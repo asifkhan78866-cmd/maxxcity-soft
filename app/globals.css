@@ -1,0 +1,246 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* MaxxCity Brand Colors */
+  --color-maxx-green: #1B5E20;
+  --color-maxx-green-light: #2E7D32;
+  --color-maxx-green-dark: #0D3B12;
+  --color-maxx-red: #D32F2F;
+  --color-maxx-red-light: #EF5350;
+  --color-maxx-gold: #E8A000;
+  --color-maxx-gold-light: #FFB300;
+  --color-maxx-black: #141414;
+  --color-maxx-white: #F7F5F0;
+}
+
+/* ─── Light Mode (MaxxCity Brand) ─── */
+:root {
+  --background: #F7F5F0;
+  --foreground: #141414;
+  --card: #FFFFFF;
+  --card-foreground: #141414;
+  --popover: #FFFFFF;
+  --popover-foreground: #141414;
+  --primary: #1B5E20;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F0EDE6;
+  --secondary-foreground: #141414;
+  --muted: #F0EDE6;
+  --muted-foreground: #6B6B6B;
+  --accent: #E8A000;
+  --accent-foreground: #141414;
+  --destructive: #D32F2F;
+  --border: #E0DDD6;
+  --input: #E0DDD6;
+  --ring: #1B5E20;
+  --chart-1: #1B5E20;
+  --chart-2: #E8A000;
+  --chart-3: #D32F2F;
+  --chart-4: #2196F3;
+  --chart-5: #9C27B0;
+  --radius: 0.625rem;
+  --sidebar: #0D3B12;
+  --sidebar-foreground: #F7F5F0;
+  --sidebar-primary: #2E7D32;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #1B5E20;
+  --sidebar-accent-foreground: #F7F5F0;
+  --sidebar-border: #0D3B12;
+  --sidebar-ring: #E8A000;
+}
+
+/* ─── Dark Mode (MaxxCity Brand) ─── */
+.dark {
+  --background: #0A0A0A;
+  --foreground: #F7F5F0;
+  --card: #1A1A1A;
+  --card-foreground: #F7F5F0;
+  --popover: #1A1A1A;
+  --popover-foreground: #F7F5F0;
+  --primary: #4CAF50;
+  --primary-foreground: #0D3B12;
+  --secondary: #2A2A2A;
+  --secondary-foreground: #F7F5F0;
+  --muted: #2A2A2A;
+  --muted-foreground: #A0A0A0;
+  --accent: #FFB300;
+  --accent-foreground: #141414;
+  --destructive: #EF5350;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #4CAF50;
+  --chart-1: #4CAF50;
+  --chart-2: #FFB300;
+  --chart-3: #EF5350;
+  --chart-4: #42A5F5;
+  --chart-5: #CE93D8;
+  --sidebar: #0D1A0F;
+  --sidebar-foreground: #F7F5F0;
+  --sidebar-primary: #4CAF50;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #1B3A1E;
+  --sidebar-accent-foreground: #F7F5F0;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #FFB300;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ─── Custom Utilities ─── */
+@layer utilities {
+  .text-gradient-green {
+    background: linear-gradient(135deg, #1B5E20, #4CAF50);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  .dark .glass-card {
+    background: rgba(26, 26, 26, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .pos-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr 360px;
+    height: calc(100vh - 64px);
+    gap: 0;
+  }
+
+  @media (max-width: 1280px) {
+    .pos-grid {
+      grid-template-columns: 280px 1fr 320px;
+    }
+  }
+
+  .sync-pulse {
+    animation: sync-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes sync-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .kpi-shimmer {
+    background: linear-gradient(
+      110deg,
+      transparent 20%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 80%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  .fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+  }
+
+  @keyframes slideInRight {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+}
+
+/* ─── Scrollbar Styling ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(27, 94, 32, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(27, 94, 32, 0.5);
+}
+
+/* ─── Print Styles ─── */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
