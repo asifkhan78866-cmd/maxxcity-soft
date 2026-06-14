@@ -80,10 +80,16 @@ export default function AIPage() {
   const loadInsights = async () => {
     setInsightLoading(true);
     try {
-      const res = await fetch('/api/ai/insights', { method: 'POST' });
+      const res = await fetch('/api/ai/weekly-insights', { method: 'GET' });
       const data = await res.json();
       if (data.success) {
-        setInsight(data.data);
+        // Map the new structure to what the UI currently expects
+        // (weekly_insights returns week_summary, opportunities, etc.)
+        setInsight({
+          title: 'Weekly Performance Review',
+          description: data.data.week_summary || data.data.top_insight,
+          suggestions: data.data.opportunities || [],
+        });
       }
     } catch {
       toast.error('Failed to load insights');

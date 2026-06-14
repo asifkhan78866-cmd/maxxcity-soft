@@ -1,2 +1,2 @@
 // Re-export from organized folder
-export * from './ai/client';
+export * from './ai/index';

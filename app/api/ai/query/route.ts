@@ -25,29 +25,20 @@ export async function POST(request: Request) {
     }
 
     // Production: Use Groq API
-    const { queryGroq, buildSalesContext } = await import('@/lib/ai');
+    const { queryGroq, buildQueryContext, fetchSalesContext } = await import('@/lib/ai');
 
-    const context = buildSalesContext({
-      recentSales: [],
-      topProducts: [
-        { product_name: 'Wireless Earbuds Pro', qty_sold: 45 },
-        { product_name: 'Kitchen Organizer Box', qty_sold: 38 },
-        { product_name: 'Cotton T-Shirt Basic', qty_sold: 35 },
-      ],
-      todayStats: { revenue: 14900, transactions: 100, items: 100 },
-      weeklyPattern: [
-        { day: 'Monday', revenue: 12000 },
-        { day: 'Tuesday', revenue: 11000 },
-        { day: 'Wednesday', revenue: 13000 },
-        { day: 'Thursday', revenue: 18000 },
-        { day: 'Friday', revenue: 14000 },
-        { day: 'Saturday', revenue: 15000 },
-        { day: 'Sunday', revenue: 17000 },
-      ],
+    const ctx = await fetchSalesContext();
+    const context = buildQueryContext(ctx);
+
+    const result = await queryGroq(question, context);
+    return NextResponse.json({ 
+      success: true, 
+      data: { 
+        answer: result.answer, 
+        chart_type: result.chart_type,
+        model: 'llama-3.3-70b-versatile' 
+      } 
     });
-
-    const answer = await queryGroq(question, context);
-    return NextResponse.json({ success: true, data: { answer, model: 'llama-3.3-70b-versatile' } });
   } catch (error) {
     console.error('AI query error:', error);
     return NextResponse.json({ success: false, error: 'AI query failed' }, { status: 500 });
