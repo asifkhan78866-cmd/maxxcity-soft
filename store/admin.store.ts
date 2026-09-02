@@ -6,6 +6,8 @@
 'use client';
 
 import { create } from 'zustand';
+import { DEFAULT_PRODUCT_PRICE, DEFAULT_LOW_STOCK_THRESHOLD } from '@/lib/config/pricing';
+import { STORE_CONFIG } from '@/lib/config/store';
 
 interface AdminState {
   // Date range filters
@@ -23,15 +25,17 @@ interface AdminState {
   // Top products toggle
   topProductsPeriod: 'week' | 'month';
 
-  // Settings
+  /**
+   * Store identity for display. The selling price is READ-ONLY here — it is a
+   * business rule owned by lib/config/pricing.ts, not editable UI state.
+   */
   settings: {
     store_name: string;
     store_address: string;
     store_gstin: string;
     store_phone: string;
-    default_price: number;
+    readonly default_product_price: number;
     low_stock_default: number;
-    thursday_target_multiplier: number;
   };
 
   // Sidebar
@@ -62,13 +66,12 @@ export const useAdminStore = create<AdminState>((set) => ({
   topProductsPeriod: 'week',
 
   settings: {
-    store_name: process.env.NEXT_PUBLIC_STORE_NAME || 'MaxxCity Mall',
-    store_address: process.env.NEXT_PUBLIC_STORE_ADDRESS || 'Ramnagar Main Road, Adilabad, Telangana 504001',
-    store_gstin: process.env.NEXT_PUBLIC_STORE_GSTIN || '',
-    store_phone: process.env.NEXT_PUBLIC_STORE_PHONE || '',
-    default_price: 149,
-    low_stock_default: 20,
-    thursday_target_multiplier: 1.25,
+    store_name: STORE_CONFIG.name,
+    store_address: `${STORE_CONFIG.address}, ${STORE_CONFIG.city}`,
+    store_gstin: STORE_CONFIG.gstin,
+    store_phone: STORE_CONFIG.phone,
+    default_product_price: DEFAULT_PRODUCT_PRICE,
+    low_stock_default: DEFAULT_LOW_STOCK_THRESHOLD,
   },
 
   sidebarOpen: true,

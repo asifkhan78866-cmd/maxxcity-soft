@@ -1,13 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+// ═══════════════════════════════════════
+// AI Insights
+// ═══════════════════════════════════════
+// Everything here is driven by real store data. When a feature is not
+// configured (no API key) or there is nothing to analyse, the page says so
+// rather than showing invented numbers.
+//
+// The forecast labels every day with the basis it was produced from —
+// observed, estimated or assumed — so an estimate is never mistaken for a
+// measurement.
+
+import { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { formatINR } from '@/lib/gst';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { formatINR } from '@/lib/money';
+import { DEFAULT_PRODUCT_PRICE } from '@/lib/config/pricing';
+import { api, ApiClientError } from '@/lib/api-client';
 import {
   Brain,
   Send,
@@ -17,290 +30,513 @@ import {
   AlertTriangle,
   Package,
   Loader2,
-  BarChart3,
   MessageSquare,
+  Info,
 } from 'lucide-react';
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Area,
+  ComposedChart,
 } from 'recharts';
 import { toast } from 'sonner';
 
-const forecastData = [
-  { day: 'Mon', predicted: 13200, confidence: 85, shandy: false },
-  { day: 'Tue', predicted: 12100, confidence: 82, shandy: false },
-  { day: 'Wed', predicted: 13800, confidence: 80, shandy: false },
-  { day: 'Thu', predicted: 18500, confidence: 90, shandy: true },
-  { day: 'Fri', predicted: 14200, confidence: 83, shandy: false },
-  { day: 'Sat', predicted: 15800, confidence: 86, shandy: false },
-  { day: 'Sun', predicted: 17400, confidence: 88, shandy: false },
-];
+interface ForecastDay {
+  date: string;
+  day_name: string;
+  predicted_revenue: number;
+  confidence_low: number;
+  confidence_high: number;
+  basis: 'observed' | 'estimated' | 'assumed';
+  sample_days: number;
+  is_shandy: boolean;
+  is_peak: boolean;
+  festival_boost: string | null;
+}
 
-const staleProducts = [
-  { name: 'Hair Clips Combo', days: 45, stock: 120 },
-  { name: 'Handkerchief Set (3pc)', days: 38, stock: 50 },
-  { name: 'Notebook A5 Pack', days: 32, stock: 90 },
-];
+interface InventoryRecommendation {
+  product_id: string;
+  name: string;
+  category: string;
+  velocity: number;
+  days_of_stock: number;
+  status: 'REORDER_NOW' | 'REORDER_SOON' | 'SLOW_MOVER' | 'DEAD_STOCK' | 'HEALTHY';
+  current_stock: number;
+}
+
+interface WeeklyInsights {
+  week_summary: string;
+  top_insight: string;
+  opportunities: string[];
+  watch_items: string[];
+  next_thursday_prep: string;
+  next_sunday_tip: string;
+  inventory_alert: string;
+  basedOnDays: number;
+}
+
+const BASIS_BADGE: Record<ForecastDay['basis'], { label: string; className: string }> = {
+  observed: { label: 'Observed', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  estimated: { label: 'Estimated', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  assumed: { label: 'Assumed', className: 'bg-muted text-muted-foreground' },
+};
+
+const STATUS_COLOR: Record<InventoryRecommendation['status'], string> = {
+  REORDER_NOW: 'bg-destructive/10 text-destructive border-destructive/20',
+  REORDER_SOON: 'bg-amber-100 text-amber-800 border-amber-200',
+  SLOW_MOVER: 'bg-blue-100 text-blue-800 border-blue-200',
+  DEAD_STOCK: 'bg-muted text-muted-foreground',
+  HEALTHY: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+};
 
 export default function AIPage() {
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string }>>([]);
-  const [loading, setLoading] = useState(false);
-  const [insight, setInsight] = useState<{ title: string; description: string; suggestions: string[] } | null>(null);
-  const [insightLoading, setInsightLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
 
-  const handleQuery = async () => {
+  const [forecast, setForecast] = useState<ForecastDay[] | null>(null);
+  const [forecastNote, setForecastNote] = useState('');
+  const [forecastLoading, setForecastLoading] = useState(false);
+
+  const [insights, setInsights] = useState<WeeklyInsights | null>(null);
+  const [insightsError, setInsightsError] = useState('');
+  const [insightsLoading, setInsightsLoading] = useState(false);
+
+  const [recommendations, setRecommendations] = useState<InventoryRecommendation[] | null>(null);
+  const [commentary, setCommentary] = useState<string | null>(null);
+  const [inventoryNote, setInventoryNote] = useState('');
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+
+  const askQuestion = useCallback(async () => {
     if (!query.trim()) return;
-
-    const userMessage = query;
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    const question = query;
+    setMessages((prev) => [...prev, { role: 'user', content: question }]);
     setQuery('');
-    setLoading(true);
+    setChatLoading(true);
 
     try {
-      const res = await fetch('/api/ai/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userMessage }),
-      });
-      const data = await res.json();
-      setMessages((prev) => [...prev, { role: 'ai', content: data.data?.answer || 'Unable to generate response.' }]);
-    } catch {
-      setMessages((prev) => [...prev, { role: 'ai', content: 'Sorry, something went wrong.' }]);
+      const result = await api.post<{ answer: string }>('/api/ai/query', { question });
+      setMessages((prev) => [...prev, { role: 'ai', content: result.answer }]);
+    } catch (error) {
+      const err = error as ApiClientError;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content:
+            err.code === 'AI_NOT_CONFIGURED'
+              ? 'The AI assistant is not configured on this deployment. Ask an administrator to add GROQ_API_KEY.'
+              : `Could not answer that: ${err.message}`,
+        },
+      ]);
     } finally {
-      setLoading(false);
+      setChatLoading(false);
     }
-  };
+  }, [query]);
 
-  const loadInsights = async () => {
-    setInsightLoading(true);
+  const loadForecast = useCallback(async () => {
+    setForecastLoading(true);
     try {
-      const res = await fetch('/api/ai/weekly-insights', { method: 'GET' });
-      const data = await res.json();
-      if (data.success) {
-        // Map the new structure to what the UI currently expects
-        // (weekly_insights returns week_summary, opportunities, etc.)
-        setInsight({
-          title: 'Weekly Performance Review',
-          description: data.data.week_summary || data.data.top_insight,
-          suggestions: data.data.opportunities || [],
-        });
-      }
-    } catch {
-      toast.error('Failed to load insights');
+      const result = await api.get<{ forecast: ForecastDay[]; disclaimer: string }>(
+        '/api/ai/forecast'
+      );
+      setForecast(result.forecast);
+      setForecastNote(result.disclaimer);
+    } catch (error) {
+      toast.error((error as ApiClientError).message);
     } finally {
-      setInsightLoading(false);
+      setForecastLoading(false);
     }
-  };
+  }, []);
+
+  const loadInsights = useCallback(async () => {
+    setInsightsLoading(true);
+    setInsightsError('');
+    try {
+      setInsights(await api.get<WeeklyInsights>('/api/ai/weekly-insights'));
+    } catch (error) {
+      const err = error as ApiClientError;
+      setInsights(null);
+      setInsightsError(err.message);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
+
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    try {
+      const result = await api.get<{
+        recommendations: InventoryRecommendation[];
+        ai_commentary: string | null;
+        note?: string;
+      }>('/api/ai/inventory-recommendations');
+      setRecommendations(result.recommendations);
+      setCommentary(result.ai_commentary);
+      setInventoryNote(result.note ?? '');
+    } catch (error) {
+      toast.error((error as ApiClientError).message);
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="w-7 h-7 text-primary" />
-            AI Analytics Engine
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Powered by Groq (llama-3.3-70b) & Anthropic Claude
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          onClick={loadInsights}
-          disabled={insightLoading}
-          className="gap-1.5"
-        >
-          {insightLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          Generate Weekly Insights
-        </Button>
+    <div className="p-6 space-y-6 max-w-[1500px]">
+      <div>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Brain className="w-6 h-6 text-primary" /> AI Insights
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          Analysis of real MaxxCity data — flat ₹{DEFAULT_PRODUCT_PRICE} selling price, Thursday
+          shandy, Sunday peak
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ─── AI Chat Panel ─── */}
-        <div className="lg:col-span-2">
-          <Card className="h-[600px] flex flex-col">
+      <Tabs defaultValue="chat">
+        <TabsList>
+          <TabsTrigger value="chat" className="gap-1.5">
+            <MessageSquare className="w-4 h-4" /> Ask
+          </TabsTrigger>
+          <TabsTrigger value="forecast" className="gap-1.5" onClick={() => void loadForecast()}>
+            <TrendingUp className="w-4 h-4" /> Forecast
+          </TabsTrigger>
+          <TabsTrigger value="weekly" className="gap-1.5" onClick={() => void loadInsights()}>
+            <Sparkles className="w-4 h-4" /> Weekly Review
+          </TabsTrigger>
+          <TabsTrigger value="inventory" className="gap-1.5" onClick={() => void loadInventory()}>
+            <Package className="w-4 h-4" /> Inventory
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ─── Chat ─── */}
+        <TabsContent value="chat" className="mt-4">
+          <Card className="flex flex-col h-[600px]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                Ask Anything About Your Store
-              </CardTitle>
+              <CardTitle className="text-base">Ask about your store</CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col p-0">
-              {/* Messages */}
-              <ScrollArea className="flex-1 px-4">
-                {messages.length === 0 && (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Brain className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p className="font-medium">Ask me about your sales data</p>
-                    <p className="text-sm mt-1">Try: &quot;What were my top products last Thursday?&quot;</p>
-                    <div className="flex flex-wrap gap-2 justify-center mt-4">
-                      {['Top selling products?', 'Thursday shandy analysis', 'Revenue this week'].map((q) => (
-                        <Button
-                          key={q}
-                          variant="outline"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => { setQuery(q); }}
-                        >
-                          {q}
-                        </Button>
-                      ))}
-                    </div>
+            <ScrollArea className="flex-1 px-6">
+              {messages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center py-16 text-muted-foreground">
+                  <Lightbulb className="w-12 h-12 mb-3 opacity-30" />
+                  <p className="text-sm max-w-sm">
+                    Ask anything about sales, stock or trading patterns. Answers are grounded in
+                    your actual transaction data.
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center mt-4">
+                    {[
+                      'What sold best this week?',
+                      'How did Thursday compare to other days?',
+                      'What should I restock first?',
+                    ].map((q) => (
+                      <Button
+                        key={q}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setQuery(q)}
+                      >
+                        {q}
+                      </Button>
+                    ))}
                   </div>
-                )}
-                <div className="space-y-4 pb-4">
-                  {messages.map((msg, i) => (
+                </div>
+              ) : (
+                <div className="space-y-4 py-2">
+                  {messages.map((m, i) => (
                     <div
                       key={i}
-                      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                          msg.role === 'user'
-                            ? 'bg-primary text-primary-foreground rounded-br-md'
-                            : 'bg-muted rounded-bl-md'
+                        className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                          m.role === 'user'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted'
                         }`}
                       >
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                        {m.content}
                       </div>
                     </div>
                   ))}
-                  {loading && (
+                  {chatLoading && (
                     <div className="flex justify-start">
-                      <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2">
+                      <div className="bg-muted rounded-lg px-4 py-2.5">
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm text-muted-foreground">Thinking...</span>
                       </div>
                     </div>
                   )}
                 </div>
-              </ScrollArea>
-
-              {/* Input */}
-              <div className="p-4 border-t">
-                <div className="flex gap-2">
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Ask about sales, products, trends..."
-                    onKeyDown={(e) => e.key === 'Enter' && handleQuery()}
-                    disabled={loading}
-                  />
-                  <Button onClick={handleQuery} disabled={loading || !query.trim()} size="icon">
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </div>
+              )}
+            </ScrollArea>
+            <CardContent className="pt-3 border-t">
+              <div className="flex gap-2">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !chatLoading) void askQuestion();
+                  }}
+                  placeholder="Ask a question…"
+                  disabled={chatLoading}
+                />
+                <Button onClick={() => void askQuestion()} disabled={chatLoading || !query.trim()}>
+                  <Send className="w-4 h-4" />
+                </Button>
               </div>
             </CardContent>
           </Card>
-        </div>
+        </TabsContent>
 
-        {/* ─── Right Panel ─── */}
-        <div className="space-y-6">
-          {/* Weekly Insight Card */}
-          {insight && (
-            <Card className="border-primary/20 fade-in">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-maxx-gold" />
-                  Weekly Insight
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <h3 className="font-semibold">{insight.title}</h3>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{insight.description}</p>
-                <Separator />
-                <div className="space-y-2">
-                  {insight.suggestions.map((s, i) => (
-                    <div key={i} className="flex items-start gap-2 text-sm">
-                      <Lightbulb className="w-4 h-4 text-maxx-gold shrink-0 mt-0.5" />
-                      <span>{s}</span>
+        {/* ─── Forecast ─── */}
+        <TabsContent value="forecast" className="mt-4 space-y-4">
+          {forecastNote && (
+            <div className="flex items-start gap-2 text-sm bg-muted/40 border rounded-md p-3">
+              <Info className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+              <p className="text-muted-foreground">{forecastNote}</p>
+            </div>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">14-Day Revenue Forecast</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {forecastLoading ? (
+                <div className="h-[320px] flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !forecast ? (
+                <div className="h-[320px] flex items-center justify-center">
+                  <Button onClick={() => void loadForecast()}>Generate forecast</Button>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={320}>
+                  <ComposedChart data={forecast}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(d: string) =>
+                        new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })
+                      }
+                    />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip
+                      formatter={(value: unknown, name: unknown) => [
+                        formatINR(Number(value ?? 0)),
+                        String(name ?? ''),
+                      ]}
+                    />
+                    <Area
+                      dataKey="confidence_high"
+                      stroke="none"
+                      fill="#1B5E20"
+                      fillOpacity={0.08}
+                      name="Upper estimate"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="predicted_revenue"
+                      stroke="#1B5E20"
+                      strokeWidth={3}
+                      dot={{ r: 3 }}
+                      name="Predicted"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          {forecast && (
+            <Card>
+              <CardContent className="p-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                  {forecast.slice(0, 7).map((day) => (
+                    <div
+                      key={day.date}
+                      className={`p-3 rounded-lg border text-center ${
+                        day.is_shandy
+                          ? 'border-maxx-gold/40 bg-maxx-gold/5'
+                          : day.is_peak
+                            ? 'border-primary/30 bg-primary/5'
+                            : ''
+                      }`}
+                    >
+                      <p className="text-xs text-muted-foreground">{day.day_name.slice(0, 3)}</p>
+                      <p className="font-bold text-sm mt-1">
+                        {formatINR(day.predicted_revenue)}
+                      </p>
+                      {/* The basis is always visible — never a bare number. */}
+                      <Badge
+                        variant="outline"
+                        className={`text-[9px] mt-1.5 ${BASIS_BADGE[day.basis].className}`}
+                      >
+                        {BASIS_BADGE[day.basis].label}
+                      </Badge>
+                      {day.festival_boost && (
+                        <p className="text-[9px] text-maxx-gold mt-1">{day.festival_boost}</p>
+                      )}
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
           )}
+        </TabsContent>
 
-          {/* 7-Day Forecast */}
+        {/* ─── Weekly review ─── */}
+        <TabsContent value="weekly" className="mt-4">
+          {insightsLoading ? (
+            <div className="flex justify-center py-20">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : insightsError ? (
+            <Card className="p-8 text-center">
+              <AlertTriangle className="w-8 h-8 mx-auto text-amber-600 mb-3" />
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">{insightsError}</p>
+            </Card>
+          ) : !insights ? (
+            <Card className="p-12 text-center">
+              <Button onClick={() => void loadInsights()}>Generate weekly review</Button>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card className="lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">This Week</CardTitle>
+                  <p className="text-[11px] text-muted-foreground">
+                    Based on {insights.basedOnDays} day(s) of recorded sales
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">{insights.week_summary}</p>
+                  <p className="text-sm font-medium mt-3 text-primary">{insights.top_insight}</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 text-amber-500" /> Opportunities
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2 text-sm">
+                    {insights.opportunities.map((o, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-primary">•</span> {o}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-destructive" /> Watch
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2 text-sm">
+                    {insights.watch_items.map((w, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-destructive">•</span> {w}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+
+              <Card className="border-maxx-gold/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Thursday (Shandy) Prep</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">{insights.next_thursday_prep}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-primary/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Sunday (Peak) Tip</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">{insights.next_sunday_tip}</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── Inventory ─── */}
+        <TabsContent value="inventory" className="mt-4 space-y-4">
+          {inventoryNote && (
+            <div className="flex items-start gap-2 text-sm bg-muted/40 border rounded-md p-3">
+              <Info className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+              <p className="text-muted-foreground">{inventoryNote}</p>
+            </div>
+          )}
+
+          {commentary && (
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-sm">{commentary}</p>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
-                7-Day Revenue Forecast
-              </CardTitle>
+              <CardTitle className="text-base">Restock Priorities</CardTitle>
+              <p className="text-[11px] text-muted-foreground">
+                Recommendations only — nothing is ordered automatically.
+              </p>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={forecastData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="day" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(value: any) => [formatINR(value as number), 'Predicted']} />
-                  <Line
-                    type="monotone"
-                    dataKey="predicted"
-                    stroke="#1B5E20"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={(props) => {
-                      const { cx, cy, payload } = props;
-                      return (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={payload.shandy ? 6 : 4}
-                          fill={payload.shandy ? '#E8A000' : '#1B5E20'}
-                          stroke="white"
-                          strokeWidth={2}
-                        />
-                      );
-                    }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-              <p className="text-[10px] text-muted-foreground text-center mt-2">
-                🟡 Thursday = Shandy Day forecast (+25%)
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Stale Products Intelligence */}
-          <Card className="border-amber-200/50">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Package className="w-4 h-4 text-amber-500" />
-                Inventory Intelligence
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground mb-3">
-                Products with no sales in 30+ days
-              </p>
-              <div className="space-y-2">
-                {staleProducts.map((p) => (
-                  <div key={p.name} className="flex items-center justify-between p-2 rounded-lg bg-amber-50 border border-amber-100">
-                    <div>
-                      <p className="text-sm font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.days} days • {p.stock} units</p>
+              {inventoryLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !recommendations ? (
+                <div className="flex justify-center py-12">
+                  <Button onClick={() => void loadInventory()}>Analyse inventory</Button>
+                </div>
+              ) : recommendations.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No products to analyse yet.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-[520px] overflow-y-auto">
+                  {recommendations.slice(0, 60).map((r) => (
+                    <div
+                      key={r.product_id}
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-lg border"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{r.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {r.current_stock} in stock · {r.velocity}/day ·{' '}
+                          {r.days_of_stock >= 999 ? 'no recent sales' : `${r.days_of_stock} days left`}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={`text-[10px] shrink-0 ${STATUS_COLOR[r.status]}`}>
+                        {r.status.replace(/_/g, ' ')}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="text-xs border-amber-300 text-amber-700">
-                      <AlertTriangle className="w-3 h-3 mr-1" />
-                      Stale
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
