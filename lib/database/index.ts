@@ -1,29 +1,42 @@
 // ═══════════════════════════════════════
 // lib/database — Database Layer Index
 // ═══════════════════════════════════════
-// Supabase (online) + Dexie/IndexedDB (offline) + Sync Engine
+// Dexie/IndexedDB (offline) + sync engine + browser Supabase client.
+//
+// Server-only modules (supabase-server, activity) are NOT re-exported here:
+// pulling them into this barrel would drag the service-role client into any
+// client component that imports from '@/lib/database'. Import them directly
+// from '@/lib/database/supabase-server' inside route handlers instead.
 
 export {
   db,
   MaxxCityDB,
   cacheProducts,
+  getCachedProducts,
   getProductByBarcode,
   searchProductsOffline,
+  getCacheAgeMinutes,
   saveOfflineSale,
-  getUnsyncedSales,
-  markSaleSynced,
+  getPendingSales,
   getPendingSyncCount,
+  markSaleSynced,
+  recordSyncFailure,
+  getStuckSales,
+  pruneSyncedSales,
+  saveHeldBill,
+  getHeldBills,
+  removeHeldBill,
   getNextOfflineInvoiceNumber,
+  isOfflineInvoiceNumber,
   type OfflineSale,
   type OfflineSaleItem,
+  type OfflineHeldBill,
   type CachedProduct,
-  type SyncQueueEntry,
   type OfflineInvoiceCounter,
+  type SyncFlag,
 } from './dexie';
 
 export { createClient, getSupabaseBrowser } from './supabase';
-
-export { createServerSupabaseClient, createServiceRoleClient } from './supabase-server';
 
 export {
   startSyncEngine,
@@ -34,4 +47,5 @@ export {
   getSyncStatus,
   getPendingCount,
   type SyncStatus,
+  type SyncSummary,
 } from './sync';
