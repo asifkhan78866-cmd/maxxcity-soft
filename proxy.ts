@@ -1,92 +1,79 @@
 // ═══════════════════════════════════════
-// Next.js Middleware — Auth + Role Guards
+// Next.js Proxy — page-level auth guard
 // ═══════════════════════════════════════
+// (Proxy is what Middleware is called from Next.js 16 onward.)
+//
+// This is an OPTIMISTIC check that keeps signed-out or under-privileged users
+// from loading a page they cannot use. It is NOT the security boundary:
+// every API route independently authorises the caller in the handler itself
+// (lib/auth/guard.ts), so hitting an admin URL directly is rejected there
+// regardless of what happens here.
+//
+// The session cookie is HMAC-signed; a client that edits its role fails
+// verification and is treated as signed out.
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth/session';
+import { canAccessRoute, landingRouteFor } from '@/lib/auth/rbac';
+
+/** Paths reachable without a session. */
+const PUBLIC_PATHS = [
+  '/login',
+  '/api/auth/pin-login',
+  '/api/auth/email-login',
+  '/api/auth/logout',
+  '/api/auth/bootstrap',
+  '/api/health',
+];
+
+/** Assets that must load before sign-in (PWA shell, icons). */
+const PUBLIC_FILES = ['/manifest.webmanifest', '/sw.js', '/offline.html', '/favicon.ico'];
+
+function isPublic(pathname: string): boolean {
+  if (PUBLIC_FILES.includes(pathname)) return true;
+  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+}
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public routes that don't need auth
-  const publicRoutes = ['/login', '/api/health', '/api/auth', '/api/seed'];
-  if (publicRoutes.some((route) => pathname.startsWith(route))) {
-    return NextResponse.next();
-  }
+  if (isPublic(pathname)) return NextResponse.next();
 
-  // Create Supabase client for middleware
-  let response = NextResponse.next({
-    request: { headers: request.headers },
-  });
+  const session = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            request.cookies.set(name, value);
-            response = NextResponse.next({
-              request: { headers: request.headers },
-            });
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
+  if (!session) {
+    // API callers get a JSON 401; a redirect would be unhelpful to fetch().
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' },
+        { status: 401 }
+      );
     }
-  );
 
-  // Check session
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // If not authenticated, redirect to login
-  // Allow PIN-authenticated sessions (stored in cookie)
-  const pinSession = request.cookies.get('maxxcity_pin_session');
-  
-  if (!user && !pinSession) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+    if (pathname !== '/') loginUrl.searchParams.set('redirect', pathname);
+
+    const response = NextResponse.redirect(loginUrl);
+    // Clear an expired or tampered cookie so the browser stops resending it.
+    response.cookies.delete(SESSION_COOKIE);
+    return response;
   }
 
-  // Role-based access control
-  if (pinSession) {
-    try {
-      const session = JSON.parse(pinSession.value);
-      const role = session.role;
+  // API authorisation happens in the route handlers, which know the specific
+  // permission each operation needs. Do not second-guess it here.
+  if (pathname.startsWith('/api/')) return NextResponse.next();
 
-      // Cashier can only access POS
-      if (role === 'CASHIER' && pathname.startsWith('/admin')) {
-        return NextResponse.redirect(new URL('/billing', request.url));
-      }
-
-      // Manager can access POS + limited admin
-      if (role === 'MANAGER') {
-        const managerAllowed = ['/billing', '/admin/inventory', '/admin/reports'];
-        const isAllowed = managerAllowed.some((r) => pathname.startsWith(r));
-        if (pathname.startsWith('/admin') && !isAllowed) {
-          return NextResponse.redirect(new URL('/billing', request.url));
-        }
-      }
-    } catch {
-      // Invalid session cookie — clear it
-      response.cookies.delete('maxxcity_pin_session');
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
+  if (!canAccessRoute(session.role, pathname)) {
+    return NextResponse.redirect(new URL(landingRouteFor(session.role), request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Everything except Next internals and static assets.
+    '/((?!_next/static|_next/image|favicon.ico|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|json|webmanifest)$).*)',
   ],
 };
