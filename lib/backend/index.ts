@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════
 // lib/backend — Business Logic Index
 // ═══════════════════════════════════════
-// GST Engine, Invoice Generator, Thermal Printer
+// GST engine · customer receipt DTO · PDF generators · thermal printer
 
 export {
   getGSTRateForCategory,
@@ -10,12 +10,26 @@ export {
   generateGSTSummary,
   calculateCartTotals,
   formatINR,
+  roundMoney,
+  type TaxableLine,
 } from './gst';
 
 export {
-  generateA4Invoice,
-  downloadInvoice,
-  printInvoice,
+  type CustomerReceiptData,
+  FORBIDDEN_RECEIPT_FIELDS,
+  RECEIPT_WIDTH,
+  buildCustomerReceipt,
+  buildCustomerReceiptFromCart,
+  renderCustomerReceiptText,
+} from './receipt';
+
+export {
+  generateCustomerReceiptPDF,
+  downloadCustomerReceipt,
+  generateGSTInvoice,
+  downloadGSTInvoice,
+  openGSTInvoice,
+  type GSTInvoiceData,
 } from './invoice';
 
 export {
@@ -24,7 +38,7 @@ export {
   disconnectPrinter,
   isPrinterConnected,
   generateReceiptText,
-  printReceipt,
+  printCustomerReceipt,
   printReceiptBrowser,
-  type ReceiptData,
+  type PrintOutcome,
 } from './printer';

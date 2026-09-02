@@ -1,17 +1,68 @@
 // ═══════════════════════════════════════
-// PDF Invoice Generator (jsPDF)
+// PDF Generators (jsPDF)
 // ═══════════════════════════════════════
-// Generates A4 GST-compliant invoices and 80mm thermal receipts
-// using jsPDF + jspdf-autotable
+// TWO DISTINCT DOCUMENTS — do not conflate them:
+//
+//   1. Customer receipt PDF  (generateCustomerReceiptPDF)
+//      80mm roll layout. Built ONLY from the sanitized CustomerReceiptData.
+//      No product names, no itemisation. Safe to hand to a customer.
+//
+//   2. Formal GST tax invoice (generateGSTInvoice)
+//      A4 layout with full item-level detail and the rate-wise GST summary,
+//      as a tax invoice legally requires. INTERNAL / ADMIN / on explicit
+//      request only — never produced as the default customer bill.
 
 'use client';
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { CartItem, InvoiceGSTSummary } from '@/types';
-import { generateGSTSummary, formatINR } from './gst';
+import type { SaleItem, PaymentMethod, InvoiceGSTSummary } from '@/types';
+import { generateGSTSummary } from './gst';
+import { formatINR } from '@/lib/money';
+import {
+  type CustomerReceiptData,
+  renderCustomerReceiptText,
+} from './receipt';
 
-interface InvoiceData {
+// ─────────────────────────────────────────────
+// 1. CUSTOMER RECEIPT PDF (sanitized)
+// ─────────────────────────────────────────────
+
+/**
+ * Render the customer receipt as an 80mm PDF.
+ * Accepts only the sanitized DTO — there is no code path here that could
+ * reach product-level data.
+ */
+export function generateCustomerReceiptPDF(data: CustomerReceiptData): jsPDF {
+  const lines = renderCustomerReceiptText(data).split('\n');
+  const lineHeight = 4;
+  const marginTop = 6;
+  const height = marginTop * 2 + lines.length * lineHeight;
+
+  const doc = new jsPDF({ unit: 'mm', format: [80, Math.max(80, height)] });
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(9);
+
+  let y = marginTop;
+  for (const line of lines) {
+    doc.text(line, 4, y);
+    y += lineHeight;
+  }
+
+  return doc;
+}
+
+export function downloadCustomerReceipt(data: CustomerReceiptData): void {
+  generateCustomerReceiptPDF(data).save(
+    `Receipt_${data.invoiceNumber.replace(/[/\\]/g, '_')}.pdf`
+  );
+}
+
+// ─────────────────────────────────────────────
+// 2. FORMAL GST TAX INVOICE (item-level, internal)
+// ─────────────────────────────────────────────
+
+export interface GSTInvoiceData {
   invoiceNumber: string;
   date: string;
   storeName: string;
@@ -19,20 +70,40 @@ interface InvoiceData {
   storeGSTIN: string;
   storePhone: string;
   cashierName: string;
-  items: CartItem[];
+  /** Full item-level detail — required on a formal tax invoice. */
+  items: Array<
+    Pick<
+      SaleItem,
+      | 'product_name'
+      | 'hsn_code'
+      | 'qty'
+      | 'unit_price'
+      | 'gst_rate'
+      | 'base_price'
+      | 'tax_amount'
+      | 'cgst'
+      | 'sgst'
+      | 'line_total'
+    >
+  >;
   subtotal: number;
   totalCGST: number;
   totalSGST: number;
   totalTax: number;
   discount: number;
   grandTotal: number;
-  paymentMethod: string;
+  paymentMethod: PaymentMethod | string;
+  customerName?: string;
+  customerPhone?: string;
 }
 
 /**
- * Generate A4 GST Invoice PDF
+ * Generate an A4 GST tax invoice with item-level detail.
+ *
+ * ADMIN / FORMAL USE ONLY. This document is not the retail customer receipt;
+ * issue it when a buyer explicitly requires a tax invoice, or for accounting.
  */
-export function generateA4Invoice(data: InvoiceData): jsPDF {
+export function generateGSTInvoice(data: GSTInvoiceData): jsPDF {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 15;
@@ -40,7 +111,7 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
   // ─── Header ───
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(27, 94, 32); // Primary Green
+  doc.setTextColor(27, 94, 32); // MaxxCity green
   doc.text(data.storeName.toUpperCase(), pageWidth / 2, y, { align: 'center' });
   y += 7;
 
@@ -61,20 +132,17 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
     y += 5;
   }
 
-  // Divider
   doc.setDrawColor(27, 94, 32);
   doc.setLineWidth(0.5);
   doc.line(14, y, pageWidth - 14, y);
   y += 8;
 
-  // ─── Tax Invoice Title ───
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
   doc.text('TAX INVOICE', pageWidth / 2, y, { align: 'center' });
   y += 8;
 
-  // ─── Invoice Details ───
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(`Invoice No: ${data.invoiceNumber}`, 14, y);
@@ -82,9 +150,19 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
   y += 5;
   doc.text(`Cashier: ${data.cashierName}`, 14, y);
   doc.text(`Payment: ${data.paymentMethod}`, pageWidth - 14, y, { align: 'right' });
-  y += 8;
+  y += 5;
 
-  // ─── Items Table ───
+  if (data.customerName || data.customerPhone) {
+    doc.text(
+      `Customer: ${[data.customerName, data.customerPhone].filter(Boolean).join(' • ')}`,
+      14,
+      y
+    );
+    y += 5;
+  }
+  y += 3;
+
+  // ─── Items table ───
   const tableData = data.items.map((item, index) => [
     index + 1,
     item.product_name,
@@ -108,9 +186,7 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
       fontStyle: 'bold',
       fontSize: 8,
     },
-    bodyStyles: {
-      fontSize: 8,
-    },
+    bodyStyles: { fontSize: 8 },
     columnStyles: {
       0: { cellWidth: 8, halign: 'center' },
       1: { cellWidth: 45 },
@@ -128,7 +204,7 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 8;
 
-  // ─── GST Summary Table ───
+  // ─── Rate-wise GST summary ───
   const gstSummary = generateGSTSummary(data.items);
   const gstTableData = gstSummary.map((g: InvoiceGSTSummary) => [
     `${g.rate}%`,
@@ -199,31 +275,28 @@ export function generateA4Invoice(data: InvoiceData): jsPDF {
   doc.text(formatINR(data.grandTotal), totalsX, y, { align: 'right' });
   y += 12;
 
-  // ─── Footer ───
   doc.setTextColor(100, 100, 100);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Thank you for shopping at ' + data.storeName + '!', pageWidth / 2, y, { align: 'center' });
+  doc.text('All prices are inclusive of GST.', pageWidth / 2, y, { align: 'center' });
   y += 5;
-  doc.text('Visit us again!', pageWidth / 2, y, { align: 'center' });
+  doc.text(`Thank you for shopping at ${data.storeName}!`, pageWidth / 2, y, {
+    align: 'center',
+  });
 
   return doc;
 }
 
-/**
- * Download the invoice as PDF
- */
-export function downloadInvoice(data: InvoiceData): void {
-  const doc = generateA4Invoice(data);
-  doc.save(`Invoice_${data.invoiceNumber.replace(/\//g, '_')}.pdf`);
+export function downloadGSTInvoice(data: GSTInvoiceData): void {
+  generateGSTInvoice(data).save(
+    `TaxInvoice_${data.invoiceNumber.replace(/[/\\]/g, '_')}.pdf`
+  );
 }
 
-/**
- * Open invoice in new tab for printing
- */
-export function printInvoice(data: InvoiceData): void {
-  const doc = generateA4Invoice(data);
-  const pdfBlob = doc.output('blob');
-  const url = URL.createObjectURL(pdfBlob);
+export function openGSTInvoice(data: GSTInvoiceData): void {
+  const blob = generateGSTInvoice(data).output('blob');
+  const url = URL.createObjectURL(blob);
   window.open(url, '_blank');
+  // Release the object URL once the new tab has had a chance to load it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
