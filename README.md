@@ -112,10 +112,19 @@ npm run lint       # eslint
 npm run verify     # typecheck + lint + test
 ```
 
-> `build` runs `next build --webpack`. Turbopack needs the native SWC binary
-> (`@next/swc-darwin-arm64`), which is not installed on this machine — its npm
-> package is present but its `.node` file is missing. Once that resolves,
-> `npm run build:turbopack` is the faster path.
+> `dev` and `build` use Turbopack, which needs the platform's native SWC binary
+> (an optional dependency of `next`). If either fails with *"Turbopack is not
+> supported on this platform … only WebAssembly bindings were loaded"*, the
+> binary did not extract — usually a corrupted npm cache entry, since the file
+> is ~116 MB:
+>
+> ```bash
+> rm -rf node_modules/@next/swc-darwin-arm64
+> npm cache clean --force
+> npm install
+> ```
+>
+> `npm run build:webpack` is the fallback if it still will not install.
 
 ---
 

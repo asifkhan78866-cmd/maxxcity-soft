@@ -4,14 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run test",
-    "build:turbopack": "next build"
+    "build:webpack": "next build --webpack"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
