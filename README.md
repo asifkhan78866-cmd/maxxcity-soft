@@ -82,20 +82,18 @@ inventory trigger with the atomic `create_sale()` RPC, and closes RLS.
 There are no default credentials anywhere in the codebase. Bootstrap once:
 
 ```bash
-# 1. Put a token in .env.local:  BOOTSTRAP_TOKEN=$(openssl rand -hex 24)
-# 2. Restart the dev server, then:
-curl -X POST http://localhost:3000/api/auth/bootstrap \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "token": "<BOOTSTRAP_TOKEN>",
-    "name": "Syed (Owner)",
-    "email": "owner@maxxcity.in",
-    "staff_code": "OWNER",
-    "pin": "482913",
-    "password": "a-long-unique-password"
-  }'
+# 1. Put a token in .env.local, then restart the dev server:
+echo "BOOTSTRAP_TOKEN=$(openssl rand -hex 24)" >> .env.local
+
+# 2. Create the account (PIN is an argument, so it is never written to a file):
+./scripts/create-admin.sh 9154 "Syed Asif" SYED
+
 # 3. Remove BOOTSTRAP_TOKEN from .env.local.
 ```
+
+A PIN alone is enough — the counter signs in with staff code + PIN. Add a
+password too (`ADMIN_PASSWORD=… ` via the API directly) only if you want the
+email login path; it must be 12+ characters.
 
 The route refuses to run once an active admin exists. Create the remaining
 staff from **Admin → Staff**.

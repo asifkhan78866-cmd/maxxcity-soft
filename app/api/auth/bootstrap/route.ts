@@ -25,9 +25,22 @@ const bootstrapSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().toLowerCase().email(),
   staff_code: z.string().trim().min(2).max(16).regex(/^[A-Za-z0-9_-]+$/),
-  pin: z.string().regex(/^\d{4,6}$/),
-  password: z.string().min(12, 'The first admin password must be at least 12 characters'),
-});
+  // A PIN alone is enough — the counter signs in with staff code + PIN, and
+  // forcing a password nobody intends to use just produces a written-down one.
+  // Matches /api/staff, which has always accepted either credential.
+  pin: z
+    .string()
+    .regex(/^\d{4,6}$/, 'PIN must be 4–6 digits')
+    .optional(),
+  password: z
+    .string()
+    .min(12, 'The admin password must be at least 12 characters')
+    .optional(),
+})
+  .refine((data) => data.pin || data.password, {
+    message: 'Set a PIN, a password, or both — the account needs a way to sign in',
+    path: ['pin'],
+  });
 
 function timingSafeStringEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -87,8 +100,8 @@ export async function POST(request: Request) {
           email: body.email,
           role: 'ADMIN',
           staff_code: staffCode,
-          pin_hash: await hashSecret(body.pin),
-          password_hash: await hashSecret(body.password),
+          pin_hash: body.pin ? await hashSecret(body.pin) : null,
+          password_hash: body.password ? await hashSecret(body.password) : null,
           is_active: true,
         },
         { onConflict: 'email' }
