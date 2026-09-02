@@ -112,19 +112,32 @@ npm run lint       # eslint
 npm run verify     # typecheck + lint + test
 ```
 
-> `dev` and `build` use Turbopack, which needs the platform's native SWC binary
-> (an optional dependency of `next`). If either fails with *"Turbopack is not
-> supported on this platform … only WebAssembly bindings were loaded"*, the
-> binary did not extract — usually a corrupted npm cache entry, since the file
-> is ~116 MB:
+> **If Turbopack reports "not supported on this platform"** — it is almost
+> certainly not the platform. Next needs a ~116 MB native SWC binary, and the
+> message appears whenever that binary cannot be loaded, for any reason.
+>
+> There are TWO places it can go wrong, and fixing only the first leaves the
+> error in place:
 >
 > ```bash
+> # 1. the real package — a truncated npm cache leaves the directory
+> #    holding only package.json and README.md, with no .node file
 > rm -rf node_modules/@next/swc-darwin-arm64
-> npm cache clean --force
-> npm install
+> npm cache clean --force && npm install
+>
+> # 2. Next's auto-downloaded fallback — created when step 1 was broken.
+> #    If that download was also incomplete it is tried FIRST on every
+> #    start and keeps failing even after step 1 is fixed.
+> rm -rf node_modules/next/next-swc-fallback .next
 > ```
 >
-> `npm run build:webpack` is the fallback if it still will not install.
+> To confirm the binary itself is healthy before blaming the platform:
+>
+> ```bash
+> node -e "require('@next/swc-darwin-arm64'); console.log('ok')"
+> ```
+>
+> `npm run build:webpack` is the fallback if it genuinely will not install.
 
 ---
 
