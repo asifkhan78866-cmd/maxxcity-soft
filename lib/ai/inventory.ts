@@ -3,6 +3,8 @@
 // ═══════════════════════════════════════
 // Analyzes sales velocity, days of stock, and categorizes products.
 
+import type { ProductRowLite } from './types';
+
 export interface InventoryRecommendation {
   product_id: string;
   name: string;
@@ -14,9 +16,9 @@ export interface InventoryRecommendation {
 }
 
 export function analyzeInventory(
-  products: any[],
-  salesByProduct: Record<string, number>, // product_id -> units sold in last 30 days
-  leadTimeDays: number = 10
+  products: ProductRowLite[],
+  /** product_id → units sold in the last 30 days */
+  salesByProduct: Record<string, number>
 ): {
   recommendations: InventoryRecommendation[];
   contextString: string;
@@ -43,7 +45,7 @@ export function analyzeInventory(
     recommendations.push({
       product_id: p.id,
       name: p.name,
-      category: p.category,
+      category: p.category ?? 'Others',
       velocity: Number(velocity.toFixed(2)),
       days_of_stock: daysOfStock,
       status,

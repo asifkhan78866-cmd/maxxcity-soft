@@ -3,6 +3,14 @@
 // ═══════════════════════════════════════
 // Pure logic engine to flag unusual retail activity
 
+import type {
+  SaleRowLite,
+  SaleItemLite,
+  ShiftRowLite,
+  ProductRowLite,
+  InventoryAuditResult,
+} from './types';
+
 export interface AnomalyAlert {
   type: 'VOID_RATE' | 'CASH_VARIANCE' | 'UNUSUAL_SCAN' | 'REVENUE_DROP' | 'INVENTORY_DISCREPANCY';
   severity: 'WARNING' | 'CRITICAL';
@@ -12,9 +20,9 @@ export interface AnomalyAlert {
 }
 
 export function detectShiftAnomalies(
-  shift: any,
-  sales: any[],
-  historicalSales: any[]
+  shift: ShiftRowLite,
+  sales: SaleRowLite[],
+  historicalSales: Array<{ grand_total: number | string }>
 ): AnomalyAlert[] {
   const anomalies: AnomalyAlert[] = [];
   const shiftId = shift.id;
@@ -52,7 +60,7 @@ export function detectShiftAnomalies(
   // Normal: max 5-10 of same item. >15 is suspicious (phantom sales)
   sales.forEach(sale => {
     if (sale.sale_items) {
-      sale.sale_items.forEach((item: any) => {
+      sale.sale_items.forEach((item: SaleItemLite) => {
         if (item.qty > 15) {
           anomalies.push({
             type: 'UNUSUAL_SCAN',
@@ -68,11 +76,11 @@ export function detectShiftAnomalies(
 
   // 4. REVENUE ANOMALY (vs Historical Average for this shift time)
   // Check if hourly revenue drops > 60% compared to last week
-  if (shift.total_sales > 0 && historicalSales.length > 0) {
+  if (Number(shift.total_sales) > 0 && historicalSales.length > 0) {
     // simplified check: just compare shift total to average shift total from history
     const histAvg = historicalSales.reduce((sum, s) => sum + Number(s.grand_total), 0) / Math.max(1, historicalSales.length);
     // Assuming historicalSales passed here are from similar shifts
-    if (histAvg > 5000 && shift.total_sales < histAvg * 0.4) {
+    if (histAvg > 5000 && Number(shift.total_sales) < histAvg * 0.4) {
       anomalies.push({
         type: 'REVENUE_DROP',
         severity: 'WARNING',
@@ -87,8 +95,8 @@ export function detectShiftAnomalies(
 }
 
 export function detectInventoryAnomalies(
-  products: any[],
-  nightlyAuditResults: any[] // e.g., [{ product_id, expected, actual }]
+  products: ProductRowLite[],
+  nightlyAuditResults: InventoryAuditResult[]
 ): AnomalyAlert[] {
   const anomalies: AnomalyAlert[] = [];
 

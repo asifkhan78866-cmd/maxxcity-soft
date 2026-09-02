@@ -4,6 +4,25 @@
 
 import Groq from 'groq-sdk';
 import type { SalesContext } from './context';
+import { DEFAULT_PRODUCT_PRICE } from '@/lib/config/pricing';
+
+// ─── Shared business context ───
+// Injected into every prompt so no model ever invents a price or misdescribes
+// how the store bills its customers.
+const BUSINESS_CONTEXT = `MaxxCity Mall is a 6,000 sq ft variety store in Adilabad, Telangana.
+PRICING: every product sells to the customer for a flat Rs.${DEFAULT_PRODUCT_PRICE}, inclusive of GST.
+  There is no Rs.149 price and never was in the current model — never state or imply one.
+  GST is back-calculated from Rs.${DEFAULT_PRODUCT_PRICE} at each product's own rate (5%, 12% or 18%).
+  Supplier cost is a separate figure; margin = Rs.${DEFAULT_PRODUCT_PRICE} minus actual purchase cost.
+DEPARTMENTS: Electronics, Kitchen, Fashion, Toys, Stationery, Care.
+TRADING PATTERN: Thursday is the local shandy (weekly market) day and draws higher footfall.
+  Sunday is the peak day.
+BILLING PRIVACY: customer receipts intentionally show only the total product count and the
+  total amount — never product names. Product-level detail exists internally for inventory,
+  audit and reporting, and is what you are analysing. Never suggest printing product names on
+  a customer receipt.
+DATA HONESTY: distinguish clearly between what the data actually shows and what you are
+  estimating. Never present an estimate as a measured fact.`;
 
 // ─── Groq Client ───
 
@@ -13,17 +32,23 @@ export function createGroqClient(): Groq {
 
 // ─── System Prompts ───
 
-const QUERY_SYSTEM_PROMPT = `You are an expert retail analyst for MaxxCity Mall, a 6,000 sq ft variety store in Adilabad, Telangana.
-Every product sells at ₹149. The store has 6 departments: Electronics, Kitchen, Fashion, Toys, Stationery, Care.
-Thursday has higher footfall (local shandy market day). Sunday is peak day.
-You have access to real sales data injected below.
+const QUERY_SYSTEM_PROMPT = `You are an expert retail analyst for MaxxCity Mall.
+
+${BUSINESS_CONTEXT}
+
+You have access to real sales data injected below. If a section says there is no data,
+say so plainly rather than inventing figures.
 Answer concisely in 2-3 sentences. Format numbers in Indian rupee format (₹).
 Always mention actionable next steps.
 If a chart would help, include chart_type in your response: "bar", "line", "pie", or null.`;
 
 const WEEKLY_INSIGHTS_PROMPT = `You are a senior retail business consultant analysing weekly performance for MaxxCity Mall, Adilabad.
-The store sells everything at ₹149. You have deep knowledge of Indian tier-3 city retail patterns, local festival calendars, and the shandy market effect on Thursdays.
-Generate insights that are specific, actionable, and calibrated for a small-city store owner.
+
+${BUSINESS_CONTEXT}
+
+You have deep knowledge of Indian tier-3 city retail patterns, local festival calendars, and the
+shandy market effect on Thursdays. Generate insights that are specific, actionable, and calibrated
+for a small-city store owner. Base every claim on the data provided.
 
 Return your response as strict JSON with this exact structure:
 {
@@ -37,8 +62,13 @@ Return your response as strict JSON with this exact structure:
   "inventory_alert": "Most urgent restocking action"
 }`;
 
-const INVENTORY_PROMPT = `You are a supply chain analyst for MaxxCity Mall, a ₹149 variety store in Adilabad.
-Given the inventory situation below, provide a prioritised restock list and flag dead stock for promotion.
+const INVENTORY_PROMPT = `You are a supply chain analyst for MaxxCity Mall.
+
+${BUSINESS_CONTEXT}
+
+Given the inventory situation below, provide a prioritised restock list and flag dead stock for
+promotion. RECOMMEND ONLY — a human approves every purchase. Never phrase a suggestion as an
+action already taken or as an order to place automatically.
 Return strict JSON:
 {
   "ai_commentary": "2-3 sentence summary of inventory health",
@@ -93,7 +123,9 @@ WEEK-OVER-WEEK:
 INVENTORY ALERTS:
 ${ctx.lowStockItems.map(p => `  ⚠️ ${p.name}: ${p.stock_qty}/${p.low_stock_threshold}`).join('\n') || '  All stock healthy'}
 
-Target weekly revenue: ₹1,00,000 (based on ₹14,000/day average)`;
+NOTE ON TARGETS: no weekly revenue target has been configured for this store. Derive any
+comparison from the actual week-over-week figures above and say explicitly that it is derived,
+rather than measuring performance against an invented target.`;
 }
 
 // ─── Groq Query (Realtime) ───
@@ -217,21 +249,4 @@ export async function generateInventoryCommentary(inventoryContext: string): Pro
     priority_actions: ['Review reorder list', 'Clear dead stock', 'Check lead times'],
     promotion_suggestions: ['Bundle slow movers with bestsellers'],
   };
-}
-
-// Legacy re-exports for backward compatibility
-export function buildSalesContext(salesData: {
-  recentSales: unknown[];
-  topProducts: unknown[];
-  todayStats: { revenue: number; transactions: number; items: number };
-  weeklyPattern: unknown[];
-}): string {
-  return buildQueryContext({
-    dailySummary30d: [],
-    topProducts20: (salesData.topProducts as any[]).map(p => ({ product_name: p.product_name, qty_sold: p.qty_sold || 0, revenue: (p.qty_sold || 0) * 149 })),
-    lowStockItems: [],
-    thisWeekVsLast: { this_week: 0, last_week: 0, change_pct: 0 },
-    todayHourlySales: [],
-    todayStats: salesData.todayStats,
-  });
 }

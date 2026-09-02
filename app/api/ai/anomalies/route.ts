@@ -1,31 +1,28 @@
 // ═══════════════════════════════════════
-// Anomaly Detection API
+// Anomaly Detection
 // ═══════════════════════════════════════
+// Pure rule engine over real shift and sales rows — no model call, so it
+// works regardless of AI configuration.
 
-import { NextResponse } from 'next/server';
+import { withPermission, ok, fail } from '@/lib/auth/guard';
 import { detectShiftAnomalies, fetchShiftAnomalyData } from '@/lib/ai';
+import { parseOrThrow, uuidSchema } from '@/lib/validation/schemas';
+import { z } from 'zod';
 
-export async function POST(request: Request) {
-  try {
-    const { shift_id } = await request.json();
+const schema = z.object({ shift_id: uuidSchema });
 
-    if (!shift_id) {
-      return NextResponse.json({ success: false, error: 'shift_id is required' }, { status: 400 });
-    }
+export const POST = withPermission(
+  'shift.read.all',
+  async (request) => {
+    const body = parseOrThrow(schema, await request.json());
 
-    const { shifts, sales, historicalSales } = await fetchShiftAnomalyData(shift_id);
-    const shift = shifts.find(s => s.id === shift_id);
+    const { shifts, sales, historicalSales } = await fetchShiftAnomalyData(body.shift_id);
+    const shift = shifts.find((s) => s.id === body.shift_id);
 
-    if (!shift) {
-      return NextResponse.json({ success: false, error: 'Shift not found' }, { status: 404 });
-    }
+    if (!shift) return fail('Shift not found', 404, 'SHIFT_NOT_FOUND');
 
-    const shiftSales = sales.filter(s => s.shift_id === shift_id);
-    const anomalies = detectShiftAnomalies(shift, shiftSales, historicalSales);
-
-    return NextResponse.json({ success: true, data: anomalies });
-  } catch (error) {
-    console.error('Anomalies error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to detect anomalies' }, { status: 500 });
-  }
-}
+    const shiftSales = sales.filter((s) => s.shift_id === body.shift_id);
+    return ok(detectShiftAnomalies(shift, shiftSales, historicalSales));
+  },
+  'ai/anomalies'
+);
