@@ -35,6 +35,9 @@ yarn-error.log*
 .env.local
 .env.production
 .env.staging
+# ...except the template, which holds placeholders only and is what
+# `cp .env.local.example .env.local` in the README copies from.
+!.env.local.example
 
 # vercel
 .vercel
