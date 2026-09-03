@@ -597,6 +597,45 @@ BEGIN
 
   v_sale_id := uuid_generate_v4();
 
+  -- ── Cash validation, before any stock moves ─────────────────
+  -- The net total is already known: every line discount sums back to the bill
+  -- discount, so net = gross - discount. Checking here means an underpaid bill
+  -- fails before it touches inventory rather than after.
+  v_sum_net := v_total_gross - v_discount_paise;
+
+  IF p_payment_method = 'CASH'
+     AND p_amount_tendered IS NOT NULL
+     AND ROUND(p_amount_tendered * 100) < v_sum_net THEN
+    RAISE EXCEPTION 'INSUFFICIENT_CASH: tendered amount is less than the bill total';
+  END IF;
+
+  v_change := CASE
+    WHEN p_payment_method = 'CASH' AND p_amount_tendered IS NOT NULL
+      THEN GREATEST(0, p_amount_tendered - (v_sum_net / 100.0))
+    ELSE NULL
+  END;
+
+  -- ── Sale header ─────────────────────────────────────────────
+  -- Inserted BEFORE the line items because sale_items.sale_id references it.
+  -- The tax columns are filled in after pass 2, which is when the per-line
+  -- split is known; the whole function is one transaction, so the intermediate
+  -- state is never visible to anyone.
+  INSERT INTO sales (
+    id, invoice_number, client_sale_id, terminal_id, shift_id, cashier_id, customer_id,
+    subtotal, total_cgst, total_sgst, total_tax, discount, grand_total, total_items,
+    payment_method, payment_status, status, amount_tendered, change_due,
+    is_offline_origin, synced_at, discount_reason, created_at, updated_at
+  ) VALUES (
+    v_sale_id, v_invoice, p_client_sale_id, p_terminal_id, p_shift_id, p_cashier_id, p_customer_id,
+    0, 0, 0, 0, v_discount_paise / 100.0, v_sum_net / 100.0, v_total_items,
+    p_payment_method, p_payment_status, 'COMPLETED', p_amount_tendered, v_change,
+    p_is_offline, CASE WHEN p_is_offline THEN NOW() ELSE NULL END,
+    p_discount_reason, v_created_at, NOW()
+  );
+
+  -- Reset so pass 2 can accumulate the authoritative figures.
+  v_sum_net := 0;
+
   -- ── Pass 2: move stock, write ledger, build lines ───────────
   FOR v_item IN
     SELECT value FROM jsonb_array_elements(p_items)
@@ -679,32 +718,14 @@ BEGIN
     );
   END LOOP;
 
-  -- ── Sale header ─────────────────────────────────────────────
-  v_change := CASE
-    WHEN p_payment_method = 'CASH' AND p_amount_tendered IS NOT NULL
-      THEN GREATEST(0, p_amount_tendered - (v_sum_net / 100.0))
-    ELSE NULL
-  END;
-
-  IF p_payment_method = 'CASH'
-     AND p_amount_tendered IS NOT NULL
-     AND ROUND(p_amount_tendered * 100) < v_sum_net THEN
-    RAISE EXCEPTION 'INSUFFICIENT_CASH: tendered amount is less than the bill total';
-  END IF;
-
-  INSERT INTO sales (
-    id, invoice_number, client_sale_id, terminal_id, shift_id, cashier_id, customer_id,
-    subtotal, total_cgst, total_sgst, total_tax, discount, grand_total, total_items,
-    payment_method, payment_status, status, amount_tendered, change_due,
-    is_offline_origin, synced_at, discount_reason, created_at, updated_at
-  ) VALUES (
-    v_sale_id, v_invoice, p_client_sale_id, p_terminal_id, p_shift_id, p_cashier_id, p_customer_id,
-    v_sum_base / 100.0, v_sum_cgst / 100.0, v_sum_sgst / 100.0,
-    (v_sum_cgst + v_sum_sgst) / 100.0, v_discount_paise / 100.0, v_sum_net / 100.0, v_total_items,
-    p_payment_method, p_payment_status, 'COMPLETED', p_amount_tendered, v_change,
-    p_is_offline, CASE WHEN p_is_offline THEN NOW() ELSE NULL END,
-    p_discount_reason, v_created_at, NOW()
-  );
+  -- ── Fill in the tax totals now the per-line split is known ──
+  UPDATE sales SET
+    subtotal    = v_sum_base / 100.0,
+    total_cgst  = v_sum_cgst / 100.0,
+    total_sgst  = v_sum_sgst / 100.0,
+    total_tax   = (v_sum_cgst + v_sum_sgst) / 100.0,
+    grand_total = v_sum_net / 100.0
+  WHERE id = v_sale_id;
 
   INSERT INTO payments (sale_id, method, amount, status, verified_at)
   VALUES (
@@ -941,6 +962,17 @@ BEGIN
 
   v_return_number := next_return_number();
 
+  -- Header first: return_items.return_id references it. Totals are filled in
+  -- once the lines are priced, all inside the one transaction.
+  INSERT INTO returns (
+    id, return_number, original_sale_id, shift_id, processed_by,
+    refund_amount, refund_method, total_items, total_cgst, total_sgst,
+    reason, status, restock
+  ) VALUES (
+    v_return_id, v_return_number, p_sale_id, p_shift_id, p_user_id,
+    0, p_refund_method, 0, 0, 0, p_reason, 'COMPLETED', p_restock
+  );
+
   FOR v_entry IN SELECT value FROM jsonb_array_elements(p_items) LOOP
     v_qty := (v_entry->>'qty')::INTEGER;
 
@@ -1001,15 +1033,12 @@ BEGIN
     );
   END LOOP;
 
-  INSERT INTO returns (
-    id, return_number, original_sale_id, shift_id, processed_by,
-    refund_amount, refund_method, total_items, total_cgst, total_sgst,
-    reason, status, restock
-  ) VALUES (
-    v_return_id, v_return_number, p_sale_id, p_shift_id, p_user_id,
-    v_total_refund / 100.0, p_refund_method, v_total_items,
-    v_total_cgst / 100.0, v_total_sgst / 100.0, p_reason, 'COMPLETED', p_restock
-  );
+  UPDATE returns SET
+    refund_amount = v_total_refund / 100.0,
+    total_items   = v_total_items,
+    total_cgst    = v_total_cgst / 100.0,
+    total_sgst    = v_total_sgst / 100.0
+  WHERE id = v_return_id;
 
   -- Fully returned or partially returned?
   SELECT COALESCE(SUM(qty - qty_returned), 0) INTO v_remaining
@@ -1322,9 +1351,21 @@ BEGIN
   END LOOP;
 END $$;
 
+-- `anon` and `authenticated` are Supabase-provided roles. They do not exist on
+-- a stock Postgres, and an unguarded REVOKE against a missing role aborts the
+-- whole migration — which also made this file impossible to dry-run locally.
+-- The grants are therefore built from the roles that actually exist.
 DO $$
-DECLARE t TEXT;
+DECLARE
+  t         TEXT;
+  fn        TEXT;
+  v_roles   TEXT;
 BEGIN
+  SELECT string_agg(quote_ident(rolname), ', ')
+    INTO v_roles
+    FROM pg_roles
+   WHERE rolname IN ('anon', 'authenticated');
+
   FOREACH t IN ARRAY ARRAY[
     'profiles','products','shifts','sales','sale_items','purchase_orders',
     'purchase_order_items','emi_cases','activity_log','sync_queue','customers',
@@ -1333,18 +1374,27 @@ BEGIN
   ] LOOP
     EXECUTE format('ALTER TABLE IF EXISTS %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE IF EXISTS %I FORCE ROW LEVEL SECURITY', t);
-    EXECUTE format('REVOKE ALL ON TABLE %I FROM anon, authenticated', t);
+    IF v_roles IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON TABLE %I FROM %s', t, v_roles);
+    END IF;
+  END LOOP;
+
+  -- Only the service role may execute the business RPCs. PUBLIC always exists,
+  -- so revoking from it is the guarantee; the named roles are belt and braces.
+  FOR fn IN
+    SELECT quote_ident(p.proname) || '(' || pg_get_function_identity_arguments(p.oid) || ')'
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('create_sale','void_sale','process_return','adjust_stock',
+                         'receive_purchase_order','close_shift',
+                         'next_invoice_number','next_return_number')
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', fn);
+    IF v_roles IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %s', fn, v_roles);
+    END IF;
   END LOOP;
 END $$;
-
--- Only the service role may execute the business RPCs.
-REVOKE ALL ON FUNCTION create_sale(TEXT,UUID,UUID,TEXT,JSONB,NUMERIC,NUMERIC,UUID,TEXT,NUMERIC,TEXT,TIMESTAMPTZ,BOOLEAN,TEXT,TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION void_sale(UUID,UUID,TEXT,BOOLEAN) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION process_return(UUID,UUID,JSONB,TEXT,TEXT,UUID,BOOLEAN) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION adjust_stock(UUID,UUID,INTEGER,TEXT,TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION receive_purchase_order(UUID,UUID,JSONB) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION close_shift(UUID,UUID,NUMERIC,TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION next_invoice_number() FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION next_return_number() FROM PUBLIC, anon, authenticated;
 
 COMMIT;

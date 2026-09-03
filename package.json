@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run test",
-    "build:webpack": "next build --webpack"
+    "build:webpack": "next build --webpack",
+    "test:db": "./scripts/test-migrations.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

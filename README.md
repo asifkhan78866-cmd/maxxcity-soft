@@ -105,10 +105,18 @@ npm run dev        # development server
 npm run build      # production build
 npm run start      # serve the production build
 npm run test       # vitest
+npm run test:db    # apply migrations to a scratch Postgres and exercise the RPCs
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run verify     # typecheck + lint + test
 ```
+
+`test:db` needs a local Postgres (`brew install postgresql@16`) and is worth
+running before touching a real database. The money logic lives in PL/pgSQL,
+where vitest cannot reach it — this is what proves ₹99 × 7 = ₹693, that a
+replayed idempotency key does not double-bill, that overselling and
+underpayment are refused, and that a void restores stock without deleting the
+record.
 
 > **If Turbopack reports "not supported on this platform"** — it is almost
 > certainly not the platform. Next needs a ~116 MB native SWC binary, and the
