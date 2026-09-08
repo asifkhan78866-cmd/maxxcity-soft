@@ -878,61 +878,78 @@ export default function POSBillingScreen() {
             </ScrollArea>
           </div>
 
-          <ScrollArea className="flex-1 p-3">
-            {catalogueLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <p className="text-center text-sm text-muted-foreground py-12">
-                No products match this filter.
-              </p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {filteredProducts.map((p) => {
-                  const outOfStock = p.stock_qty <= 0;
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => addProduct(p)}
-                      disabled={outOfStock}
-                      className={`flex flex-col items-start p-2 rounded-lg border text-left bg-background transition-all ${
-                        outOfStock
-                          ? 'opacity-40 cursor-not-allowed'
-                          : 'hover:border-primary/50 hover:bg-primary/5'
-                      }`}
+          {/* ── Quick-add panel (printer testing) ── */}
+          <div className="flex-1 p-4 flex flex-col items-center justify-center gap-6">
+            {(() => {
+              // Dummy product for testing — no catalogue needed
+              const DUMMY_PRODUCT: Product = {
+                id: 'dummy-maxxcity-99',
+                name: 'MaxxCity Product 99rs',
+                barcode: '0000000000000',
+                category: 'Others' as Product['category'],
+                hsn_code: '6211',
+                gst_rate: 5 as Product['gst_rate'],
+                price: DEFAULT_PRODUCT_PRICE,
+                stock_qty: 9999,
+                low_stock_threshold: 10,
+                allow_negative_stock: true,
+                is_active: true,
+                created_at: '',
+                updated_at: '',
+              };
+
+              const inCart = cart.find((i) => i.product_id === DUMMY_PRODUCT.id);
+              const qty = inCart?.qty ?? 0;
+
+              return (
+                <>
+                  <div className="text-center">
+                    <div className="text-2xl font-black text-primary">MaxxCity Product 99rs</div>
+                    <div className="text-sm text-muted-foreground mt-1">₹{DEFAULT_PRODUCT_PRICE} per item · For printer testing</div>
+                  </div>
+
+                  <div className="flex items-center gap-6">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-14 w-14 rounded-full border-2 border-red-300 hover:bg-red-50 hover:border-red-400 transition-all"
+                      disabled={qty === 0}
+                      onClick={() => {
+                        if (inCart) {
+                          if (qty <= 1) store.removeFromCart(inCart.id);
+                          else store.setQty(inCart.id, qty - 1);
+                        }
+                      }}
                     >
-                      <span className="text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem]">
-                        {p.name}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground mt-1 truncate w-full">
-                        {p.barcode}
-                      </span>
-                      <div className="mt-2 flex items-center justify-between w-full gap-1">
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] px-1 bg-maxx-gold/20 text-maxx-gold border-maxx-gold/30"
-                        >
-                          ₹{DEFAULT_PRODUCT_PRICE}
-                        </Badge>
-                        <span
-                          className={`text-[9px] font-bold ${
-                            outOfStock
-                              ? 'text-destructive'
-                              : p.stock_qty <= p.low_stock_threshold
-                                ? 'text-orange-600'
-                                : 'text-muted-foreground'
-                          }`}
-                        >
-                          {outOfStock ? 'OUT' : `${p.stock_qty} left`}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </ScrollArea>
+                      <Minus className="w-6 h-6 text-red-500" />
+                    </Button>
+
+                    <div className="flex flex-col items-center">
+                      <span className="text-5xl font-black tabular-nums text-primary">{qty}</span>
+                      <span className="text-xs text-muted-foreground mt-1">in cart</span>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-14 w-14 rounded-full border-2 border-green-300 hover:bg-green-50 hover:border-green-400 transition-all"
+                      onClick={() => {
+                        ensureBasketId();
+                        const result = store.addToCart(DUMMY_PRODUCT);
+                        if (!result.ok) toast.error(result.message ?? 'Could not add');
+                      }}
+                    >
+                      <Plus className="w-6 h-6 text-green-600" />
+                    </Button>
+                  </div>
+
+                  <div className="text-center text-sm text-muted-foreground">
+                    Total: <span className="font-bold text-primary">{formatINR(qty * DEFAULT_PRODUCT_PRICE)}</span>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
 
         {/* ══════════ CENTER — CASHIER CART (internal view) ══════════ */}
