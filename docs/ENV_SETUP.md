@@ -100,6 +100,23 @@ Only needed to run migrations. The application never reads it.
 **Project Settings → Database → Connection string → URI**, and choose the
 **Session pooler** (port `5432`).
 
+> ### ⚠️ Use the pooler, not the direct connection
+>
+> The direct host — `db.<ref>.supabase.co` — publishes **only an AAAA (IPv6)
+> record**. On a network without IPv6 (most home and office connections in
+> India), `psql` fails with:
+>
+> ```
+> could not translate host name "db.<ref>.supabase.co" to address
+> ```
+>
+> This is intermittent and misleading: it can appear to work, then stop when
+> the network changes. The **Session pooler** host
+> (`aws-0-<region>.pooler.supabase.com`) has an A record and works over IPv4.
+>
+> Note the pooler username differs — it is `postgres.<project-ref>`, not
+> `postgres`.
+
 ```
 postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-0-ap-south-1.pooler.supabase.com:5432/postgres
 ```
