@@ -5,6 +5,8 @@
 // Values come from environment variables so the same build can serve
 // a different outlet without a code change.
 
+import { publicEnv } from './public-env';
+
 export interface StoreConfig {
   name: string;
   address: string;
@@ -15,14 +17,14 @@ export interface StoreConfig {
 }
 
 export const STORE_CONFIG: StoreConfig = {
-  name: process.env.NEXT_PUBLIC_STORE_NAME || 'MaxxCity Mall',
-  address: process.env.NEXT_PUBLIC_STORE_ADDRESS || 'Ramnagar Main Road',
-  city: process.env.NEXT_PUBLIC_STORE_CITY || 'Adilabad, Telangana 504001',
+  name: publicEnv.storeName,
+  address: publicEnv.storeAddress,
+  city: publicEnv.storeCity,
   // Empty until the real GSTIN is provided. Receipts omit the line when blank
   // rather than printing a placeholder that would be legally misleading.
-  gstin: process.env.NEXT_PUBLIC_STORE_GSTIN || '',
-  phone: process.env.NEXT_PUBLIC_STORE_PHONE || '',
-  upiId: process.env.NEXT_PUBLIC_STORE_UPI_ID || '',
+  gstin: publicEnv.storeGstin,
+  phone: publicEnv.storePhone,
+  upiId: publicEnv.storeUpiId,
 };
 
 /**
@@ -32,7 +34,7 @@ export const STORE_CONFIG: StoreConfig = {
  * different counters can never collide. Configure NEXT_PUBLIC_TERMINAL_ID per
  * machine; when unset a stable per-browser id is generated and persisted.
  */
-export const CONFIGURED_TERMINAL_ID = process.env.NEXT_PUBLIC_TERMINAL_ID || '';
+export const CONFIGURED_TERMINAL_ID = publicEnv.terminalId;
 
 const TERMINAL_STORAGE_KEY = 'maxxcity_terminal_id';
 

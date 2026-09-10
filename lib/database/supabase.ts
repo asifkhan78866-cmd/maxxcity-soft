@@ -13,12 +13,10 @@
 // priced by the server.
 
 import { createBrowserClient } from '@supabase/ssr';
+import { publicEnv } from '@/lib/config/public-env';
 
 export function createClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return createBrowserClient(publicEnv.supabaseUrl, publicEnv.supabaseAnonKey);
 }
 
 let browserClient: ReturnType<typeof createBrowserClient> | null = null;

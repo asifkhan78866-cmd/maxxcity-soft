@@ -10,6 +10,7 @@
 // Never hardcode the selling price anywhere else — import from here.
 
 import type { GSTRate } from '@/types';
+import { publicEnv } from './public-env';
 
 /** Flat customer selling price (GST-inclusive) for every product. */
 export const DEFAULT_PRODUCT_PRICE = 99;
@@ -49,9 +50,7 @@ export const DEFAULT_LOW_STOCK_THRESHOLD = 20;
  * relationship to the ₹99 product selling price. It is configured separately
  * so a change to one never silently changes the other.
  */
-export const EMI_BOOKING_FEE = Number(
-  process.env.NEXT_PUBLIC_EMI_BOOKING_FEE ?? 199
-);
+export const EMI_BOOKING_FEE = publicEnv.emiBookingFee;
 
 /**
  * Resolve the authoritative selling price for a product.

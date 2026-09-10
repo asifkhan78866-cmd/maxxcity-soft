@@ -52,12 +52,19 @@ permission.
 ## Getting started
 
 ```bash
-cp .env.local.example .env.local
+cp .env.example .env.local
 ```
 
 Fill in `.env.local` — at minimum `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and
-`SESSION_SECRET`.
+`SESSION_SECRET`. Then check it:
+
+```bash
+npm run env:check
+```
+
+**[docs/ENV_SETUP.md](docs/ENV_SETUP.md)** walks through where every value
+comes from, which are public, and which must never leave the server.
 
 ```bash
 npm install
@@ -106,6 +113,8 @@ npm run build      # production build
 npm run start      # serve the production build
 npm run test       # vitest
 npm run test:db    # apply migrations to a scratch Postgres and exercise the RPCs
+npm run env:check  # validate .env.local (never prints a secret)
+npm run env:audit  # build, then prove no secret reached the client bundle
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run verify     # typecheck + lint + test
@@ -294,7 +303,7 @@ These need real-world values or credentials before go-live:
 | Item | Status |
 | --- | --- |
 | `SESSION_SECRET` | **Required.** Production refuses sessions without it. |
-| Supabase keys | Rotate — the previous ones were committed to `.env.local.example`. |
+| Supabase keys | Rotate — the previous ones were committed to `.env.example`. |
 | GSTIN | Blank. Receipts omit the line until a real GSTIN is set. |
 | UPI / card provider | **Not integrated.** The POS records the *cashier's* confirmation and says so on screen. Wiring a provider means server-side verification before a payment is marked COMPLETED. |
 | Thermal printer | Web Serial, 80mm ESC/POS. Needs a physical printer and a one-time in-browser permission grant. Chrome/Edge only; other browsers fall back to the print dialog. |

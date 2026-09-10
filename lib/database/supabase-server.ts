@@ -11,15 +11,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `${name} is not configured. Copy .env.local.example to .env.local and fill it in.`
-    );
-  }
-  return value;
-}
+import { getServerEnv } from '@/lib/config/env';
 
 /**
  * Anon-key client bound to the request cookies.
@@ -29,9 +21,11 @@ function requireEnv(name: string): string {
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
 
+  const env = getServerEnv();
+
   return createServerClient(
-    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -63,9 +57,11 @@ let serviceClient: SupabaseClient | null = null;
 export function createServiceRoleClient(): SupabaseClient {
   if (serviceClient) return serviceClient;
 
+  const env = getServerEnv();
+
   serviceClient = createClient(
-    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
     {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { 'x-application-name': 'maxxcity-pos' } },

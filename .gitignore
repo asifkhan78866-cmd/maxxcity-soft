@@ -31,13 +31,19 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files — NEVER commit secrets
+# The wildcard is the real guard; the explicit lines below document the
+# specific files people expect to see listed and survive any narrowing of it.
 .env*
+.env
 .env.local
+.env.*.local
 .env.production
 .env.staging
-# ...except the template, which holds placeholders only and is what
-# `cp .env.local.example .env.local` in the README copies from.
-!.env.local.example
+
+# ...except the placeholder-only template. Without this exception the
+# wildcard above would swallow it, and `cp .env.example .env.local` in the
+# README would fail on a fresh clone.
+!.env.example
 
 # vercel
 .vercel

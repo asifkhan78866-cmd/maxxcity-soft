@@ -6,6 +6,9 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // scripts/*.mts import ../lib/**/*.ts with the extension, which Node
+    // requires for native type stripping. Safe because noEmit is on.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "build:webpack": "next build --webpack",
-    "test:db": "./scripts/test-migrations.sh"
+    "test:db": "./scripts/test-migrations.sh",
+    "env:check": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-env.mts",
+    "env:audit": "./scripts/audit-client-bundle.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
