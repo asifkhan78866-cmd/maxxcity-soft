@@ -35,11 +35,7 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
-export async function proxy(_request: NextRequest) {
-  // ⚠️  TEMPORARY: auth bypass for printer testing — revert after!
-  return NextResponse.next();
-
-  /* ── Original auth logic (uncomment to restore) ──
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublic(pathname)) return NextResponse.next();
@@ -69,7 +65,6 @@ export async function proxy(_request: NextRequest) {
   }
 
   return NextResponse.next();
-  */
 }
 
 export const config = {
