@@ -198,18 +198,39 @@ export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
     @page { margin: 0; size: 80mm auto; }
     body {
       font-family: 'Courier New', Courier, monospace;
-      font-size: 12px;
+      font-size: 13px;
+      font-weight: 900; /* Extra bold for dark printing */
+      color: #000; /* Pure black */
       line-height: 1.4;
       margin: 8px;
       white-space: pre;
+      text-align: center;
+    }
+    .logo {
+      display: block;
+      width: 75mm; /* Enlarged to almost fill the 80mm receipt width */
+      max-width: 100%;
+      margin: 0 auto -5px auto; /* Reduced space below logo */
+      filter: grayscale(100%) contrast(2.5) brightness(0.6); /* Force maximum darkness for the text */
+      mix-blend-mode: multiply; /* Removes white background */
+    }
+    .content {
+      text-align: left;
+      display: inline-block;
+      white-space: pre;
+      font-weight: 900; /* Force bold text */
+      text-shadow: 0 0 1px #000; /* Additional trick for darker prints in some browsers */
+      margin-top: -15px; /* Pull the text up even tighter */
     }
   </style>
 </head>
-<body>${escapeHtml(receiptText)}</body>
+<body>
+  <img src="/logo.jpeg" class="logo" alt="Logo" onload="window.print()" onerror="window.print()" />
+  <div class="content">${escapeHtml(receiptText.replace(/^\\n+/, ''))}</div>
+</body>
 </html>`);
   printWindow.document.close();
   printWindow.focus();
-  printWindow.print();
 
   return { ok: true, via: 'browser' };
 }
