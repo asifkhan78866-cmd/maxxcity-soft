@@ -75,11 +75,21 @@ export async function POST(request: Request) {
     }
 
     const supabase = createServiceRoleClient();
+
+    // "Already bootstrapped" means an admin who can actually SIGN IN — not
+    // merely a row with role ADMIN.
+    //
+    // Migration 0001 seeds an admin with pin_hash and password_hash both NULL.
+    // That account can never authenticate, but a bare role check counted it,
+    // so bootstrap refused to run and a fresh install had no way in at all.
+    // Requiring a usable credential lets bootstrap adopt and repair that row
+    // (the upsert below matches on email, preserving its id and history).
     const { count, error: countError } = await supabase
       .from('profiles')
       .select('id', { count: 'exact', head: true })
       .eq('role', 'ADMIN')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .or('pin_hash.not.is.null,password_hash.not.is.null');
 
     if (countError) throw countError;
 
