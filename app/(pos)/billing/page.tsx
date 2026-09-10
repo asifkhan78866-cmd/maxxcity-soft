@@ -31,6 +31,7 @@ import { useOnlineStatus, useTerminalId } from '@/lib/hooks/use-connectivity';
 import { api, ApiClientError } from '@/lib/api-client';
 import { formatINR } from '@/lib/money';
 import { DEFAULT_PRODUCT_PRICE } from '@/lib/config/pricing';
+import { STORE_CONFIG } from '@/lib/config/store';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1258,7 +1259,7 @@ export default function POSBillingScreen() {
                       Collect {formatINR(totals.grandTotal)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {process.env.NEXT_PUBLIC_STORE_UPI_ID || 'UPI ID not configured'}
+                      {STORE_CONFIG.upiId || 'UPI ID not configured'}
                     </p>
                   </div>
                   {/* Honest about what the button means: no provider is wired up,
