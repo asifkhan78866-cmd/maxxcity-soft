@@ -22,6 +22,20 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- NOTE ON UUID GENERATION
+-- Column DEFAULTs may use uuid_generate_v4(): a DEFAULT resolves the function
+-- at DDL time and keeps working afterwards.
+--
+-- Function BODIES must NOT. Supabase installs uuid-ossp into the `extensions`
+-- schema, while the RPCs below pin `SET search_path = public` (deliberately —
+-- an unpinned search_path on a SECURITY DEFINER function is a privilege
+-- escalation risk). uuid_generate_v4() is therefore unresolvable inside them
+-- and every sale fails at runtime with "function uuid_generate_v4() does not
+-- exist".
+--
+-- gen_random_uuid() lives in pg_catalog (core, since PG13), so it resolves
+-- under any search_path. Use it inside function bodies.
+
 -- ───────────────────────────────────────────────
 -- 1. PRICING: ₹149 → ₹99
 -- ───────────────────────────────────────────────
@@ -595,7 +609,7 @@ BEGIN
     v_invoice := next_invoice_number();
   END IF;
 
-  v_sale_id := uuid_generate_v4();
+  v_sale_id := gen_random_uuid();
 
   -- ── Cash validation, before any stock moves ─────────────────
   -- The net total is already known: every line discount sums back to the bill
@@ -688,7 +702,7 @@ BEGIN
         v_product.name;
     END IF;
 
-    v_sale_item_id := uuid_generate_v4();
+    v_sale_item_id := gen_random_uuid();
 
     INSERT INTO sale_items (
       id, sale_id, product_id, product_name, barcode, hsn_code,
@@ -924,7 +938,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_sale          sales%ROWTYPE;
-  v_return_id     UUID := uuid_generate_v4();
+  v_return_id     UUID := gen_random_uuid();
   v_return_number TEXT;
   v_entry         JSONB;
   v_item          sale_items%ROWTYPE;
