@@ -32,9 +32,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // Browser extensions write attributes onto <html> before React hydrates
+    // (e.g. `crxlauncher=""`), which React reports as a hydration mismatch.
+    // suppressHydrationWarning only applies to this element's own attributes,
+    // one level deep — genuine mismatches in the page below still surface.
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <TooltipProvider>{children}</TooltipProvider>
