@@ -127,6 +127,13 @@ const CAT_COLORS: Record<string, string> = {
   Seasonal: 'bg-red-100 text-red-800 border-red-200',
 };
 
+/**
+ * Barcode of the catalogue product behind the quick-add panel. It must be a
+ * real row in `products`: checkout sends only product ids, and the server
+ * rejects any id it cannot find.
+ */
+const QUICK_ADD_BARCODE = 'MAXXCITY-99';
+
 function cachedToProduct(p: CachedProduct): Product {
   return {
     id: p.id,
@@ -882,30 +889,36 @@ export default function POSBillingScreen() {
           {/* ── Quick-add panel (printer testing) ── */}
           <div className="flex-1 p-4 flex flex-col items-center justify-center gap-6">
             {(() => {
-              // Dummy product for testing — no catalogue needed
-              const DUMMY_PRODUCT: Product = {
-                id: 'dummy-maxxcity-99',
-                name: 'MaxxCity Product 99rs',
-                barcode: '0000000000000',
-                category: 'Others' as Product['category'],
-                hsn_code: '6211',
-                gst_rate: 5 as Product['gst_rate'],
-                price: DEFAULT_PRODUCT_PRICE,
-                stock_qty: 9999,
-                low_stock_threshold: 10,
-                allow_negative_stock: true,
-                is_active: true,
-                created_at: '',
-                updated_at: '',
-              };
+              // A real catalogue product, found by barcode. A made-up product
+              // (the old 'dummy-maxxcity-99') is rejected at checkout with
+              // "Must be a valid id" — and create_sale needs a real row anyway
+              // to decrement its stock through the ledger.
+              const quickProduct = allProducts.find((p) => p.barcode === QUICK_ADD_BARCODE);
 
-              const inCart = cart.find((i) => i.product_id === DUMMY_PRODUCT.id);
+              if (!quickProduct) {
+                return (
+                  <div className="text-center text-sm text-muted-foreground">
+                    {catalogueLoading ? (
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                    ) : (
+                      <>
+                        No product with barcode{' '}
+                        <span className="font-mono font-semibold">{QUICK_ADD_BARCODE}</span>.
+                        <br />
+                        Add it to the catalogue first.
+                      </>
+                    )}
+                  </div>
+                );
+              }
+
+              const inCart = cart.find((i) => i.product_id === quickProduct.id);
               const qty = inCart?.qty ?? 0;
 
               return (
                 <>
                   <div className="text-center">
-                    <div className="text-2xl font-black text-primary">MaxxCity Product 99rs</div>
+                    <div className="text-2xl font-black text-primary">{quickProduct.name}</div>
                     <div className="text-sm text-muted-foreground mt-1">₹{DEFAULT_PRODUCT_PRICE} per item · For printer testing</div>
                   </div>
 
@@ -934,11 +947,7 @@ export default function POSBillingScreen() {
                       variant="outline"
                       size="icon"
                       className="h-14 w-14 rounded-full border-2 border-green-300 hover:bg-green-50 hover:border-green-400 transition-all"
-                      onClick={() => {
-                        ensureBasketId();
-                        const result = store.addToCart(DUMMY_PRODUCT);
-                        if (!result.ok) toast.error(result.message ?? 'Could not add');
-                      }}
+                      onClick={() => addProduct(quickProduct)}
                     >
                       <Plus className="w-6 h-6 text-green-600" />
                     </Button>
