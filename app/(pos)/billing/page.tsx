@@ -5,7 +5,8 @@
 // ═══════════════════════════════════════
 // Three panels, keyboard-first, offline-capable.
 //
-//   LEFT   — barcode input, search, categories, product grid
+//   LEFT   — quick-add panel (tap + / −), search, categories. No barcode
+//            scanning — items are added by tapping, never by scanning.
 //   CENTER — the CASHIER'S cart. Product names are shown here on purpose:
 //            this is the internal view, not the customer's receipt.
 //   RIGHT  — totals, payment, confirm
@@ -25,7 +26,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePOSStore } from '@/store/pos.store';
-import { useBarcodeScanner } from '@/lib/barcode';
 import { useSession } from '@/lib/hooks/use-session';
 import { useOnlineStatus, useTerminalId } from '@/lib/hooks/use-connectivity';
 import { api, ApiClientError } from '@/lib/api-client';
@@ -49,7 +49,6 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import {
-  Scan,
   Search,
   Plus,
   Minus,
@@ -145,6 +144,7 @@ function cachedToProduct(p: CachedProduct): Product {
     price: p.price,
     stock_qty: p.stock_qty,
     low_stock_threshold: p.low_stock_threshold,
+    allow_negative_stock: p.allow_negative_stock ?? false,
     is_active: p.is_active,
     created_at: '',
     updated_at: '',
@@ -196,8 +196,6 @@ export default function POSBillingScreen() {
   const [showHeldBills, setShowHeldBills] = useState(false);
   const [shiftBusy, setShiftBusy] = useState(false);
 
-  const barcodeInputRef = useRef<HTMLInputElement>(null);
-
   /**
    * Idempotency key for the CURRENT basket.
    *
@@ -217,20 +215,6 @@ export default function POSBillingScreen() {
     if (user) usePOSStore.getState().setCashier(user.id, user.name, user.role);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
-
-  // ── Keep the barcode field focused ──
-  useEffect(() => {
-    barcodeInputRef.current?.focus();
-    const interval = setInterval(() => {
-      const active = document.activeElement;
-      const typingElsewhere =
-        active instanceof HTMLInputElement ||
-        active instanceof HTMLTextAreaElement ||
-        (active as HTMLElement | null)?.isContentEditable;
-      if (!typingElsewhere && !outcome) barcodeInputRef.current?.focus();
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [outcome]);
 
   // ── Catalogue: server when online, IndexedDB cache otherwise ──
 
@@ -260,6 +244,7 @@ export default function POSBillingScreen() {
               stock_qty: p.stock_qty,
               low_stock_threshold: p.low_stock_threshold,
               is_active: p.is_active,
+              allow_negative_stock: p.allow_negative_stock ?? false,
             }))
           );
         }
@@ -392,18 +377,6 @@ export default function POSBillingScreen() {
     [ensureBasketId]
   );
 
-  useBarcodeScanner({
-    enabled: !outcome && !isProcessing,
-    onScan: (barcode) => {
-      const product = allProducts.find((p) => p.barcode === barcode);
-      if (!product) {
-        toast.error(`No product with barcode ${barcode}`);
-        return;
-      }
-      if (addProduct(product)) toast.success(product.name, { duration: 1200 });
-    },
-  });
-
   // ── Customer lookup (never blocks checkout) ──
   const lookupCustomer = useCallback(async () => {
     if (customerPhone.length !== 10) {
@@ -441,7 +414,6 @@ export default function POSBillingScreen() {
     setCustomerName('');
     setCustomerLookupState('idle');
     setOutcome(null);
-    setTimeout(() => barcodeInputRef.current?.focus(), 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -845,16 +817,6 @@ export default function POSBillingScreen() {
         <div className="w-[30%] border-r border-border flex flex-col bg-card shrink-0">
           <div className="p-3 border-b border-border space-y-3">
             <div className="relative">
-              <Scan className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary" />
-              <Input
-                ref={barcodeInputRef}
-                placeholder="Scan barcode…"
-                className="pl-10 h-12 bg-primary/5 border-primary/20 font-bold"
-                data-barcode-input="true"
-                aria-label="Barcode scanner input"
-              />
-            </div>
-            <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="Search by name or barcode…"
@@ -983,14 +945,14 @@ export default function POSBillingScreen() {
           <ScrollArea className="flex-1">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-muted-foreground py-28">
-                <QrCode className="w-24 h-24 mb-4 opacity-20" />
-                <p className="text-xl font-semibold">Scan a product to begin</p>
+                <Plus className="w-24 h-24 mb-4 opacity-20" />
+                <p className="text-xl font-semibold">Tap + to add items</p>
                 <p className="text-sm mt-2">Every item ₹{DEFAULT_PRODUCT_PRICE}</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
                 {cart.map((item, idx) => {
-                  const short = item.qty > item.stock_qty;
+                  const short = !item.allow_negative_stock && item.qty > item.stock_qty;
                   return (
                     <div
                       key={item.id}
