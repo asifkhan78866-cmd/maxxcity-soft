@@ -18,10 +18,12 @@ import { logActivity } from '@/lib/database/activity';
 import { rows, row } from '@/lib/database/rows';
 import type { Product } from '@/types';
 
+// allow_negative_stock is part of the POS view: without it the counter cannot
+// tell that a product may sell past zero, and blocks the bill locally.
 const POS_FIELDS =
-  'id, name, barcode, category, hsn_code, gst_rate, price, stock_qty, low_stock_threshold, is_active, created_at, updated_at';
+  'id, name, barcode, category, hsn_code, gst_rate, price, stock_qty, low_stock_threshold, allow_negative_stock, is_active, created_at, updated_at';
 
-const ADMIN_FIELDS = `${POS_FIELDS}, cost_price, supplier_id, allow_negative_stock`;
+const ADMIN_FIELDS = `${POS_FIELDS}, cost_price, supplier_id`;
 
 export async function GET(request: Request) {
   try {

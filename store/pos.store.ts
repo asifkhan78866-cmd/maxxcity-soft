@@ -138,7 +138,13 @@ export const usePOSStore = create<POSState>((set, get) => ({
       set({
         cart: state.cart.map((item) =>
           item.id === existing.id
-            ? { ...item, qty: newQty, stock_qty: product.stock_qty, ...line }
+            ? {
+                ...item,
+                qty: newQty,
+                stock_qty: product.stock_qty,
+                allow_negative_stock: product.allow_negative_stock ?? false,
+                ...line,
+              }
             : item
         ),
       });
@@ -162,6 +168,7 @@ export const usePOSStore = create<POSState>((set, get) => ({
       sgst: gst.sgst,
       line_total: unitPrice,
       stock_qty: product.stock_qty,
+      allow_negative_stock: product.allow_negative_stock ?? false,
     };
 
     set({ cart: [...state.cart, newItem] });
@@ -178,7 +185,7 @@ export const usePOSStore = create<POSState>((set, get) => ({
       return { ok: true };
     }
 
-    if (qty > item.stock_qty) {
+    if (!item.allow_negative_stock && qty > item.stock_qty) {
       return {
         ok: false,
         reason: 'INSUFFICIENT_STOCK',
@@ -337,6 +344,7 @@ export const usePOSStore = create<POSState>((set, get) => ({
 
   getStockIssues: () =>
     get()
-      .cart.filter((item) => item.qty > item.stock_qty)
+      // A product allowed to sell past zero is never a stock issue.
+      .cart.filter((item) => !item.allow_negative_stock && item.qty > item.stock_qty)
       .map((item) => ({ item, available: item.stock_qty })),
 }));

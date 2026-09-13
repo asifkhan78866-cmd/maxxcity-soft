@@ -436,17 +436,20 @@ export async function getInventorySummary() {
 
   const products = data ?? [];
   const active = products.filter((p) => p.is_active);
-  const totalUnits = active.reduce((sum, p) => sum + p.stock_qty, 0);
+  // A product allowed to sell past zero (allow_negative_stock) can hold a
+  // negative count. That is stock owed, not negative value — count it as 0.
+  const onHand = (p: { stock_qty: number }) => Math.max(0, p.stock_qty);
+  const totalUnits = active.reduce((sum, p) => sum + onHand(p), 0);
 
   // Retail value uses the actual selling price on each row (which the pricing
   // rule keeps at the flat price); cost value only counts rows where a real
   // supplier cost has been captured.
   const retailValue = toRupees(
-    active.reduce((sum, p) => sum + toPaise(Number(p.price)) * p.stock_qty, 0)
+    active.reduce((sum, p) => sum + toPaise(Number(p.price)) * onHand(p), 0)
   );
   const withCost = active.filter((p) => p.cost_price != null);
   const costValue = toRupees(
-    withCost.reduce((sum, p) => sum + toPaise(Number(p.cost_price)) * p.stock_qty, 0)
+    withCost.reduce((sum, p) => sum + toPaise(Number(p.cost_price)) * onHand(p), 0)
   );
 
   const lowStock = active

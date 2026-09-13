@@ -100,6 +100,8 @@ export interface CartItem {
   sgst: number;
   line_total: number; // qty × unit_price
   stock_qty: number; // Stock known at the time the line was added
+  /** The product may sell past zero stock — never block this line on stock. */
+  allow_negative_stock?: boolean;
 }
 
 // ─── Sales ───

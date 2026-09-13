@@ -83,6 +83,8 @@ export interface CachedProduct {
   stock_qty: number;
   low_stock_threshold: number;
   is_active: boolean;
+  /** Optional: rows cached before this field existed simply lack it. */
+  allow_negative_stock?: boolean;
   cached_at: string;
 }
 
