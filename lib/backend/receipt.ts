@@ -173,24 +173,82 @@ export function buildCustomerReceiptFromCart(input: {
   };
 }
 
-// ─── Thermal text rendering (48 columns, 80mm paper) ───
+// ─── Text rendering ───
+// 48 columns is the native width of an 80mm thermal printer (Font A). The
+// browser-printed receipt uses a narrower layout so it can be printed in
+// large type: a 48-column line in readable type is wider than the paper, and
+// the browser then shrinks the whole receipt to fit — tiny, faint text.
 
 export const RECEIPT_WIDTH = 48;
 
-function centerText(text: string, width = RECEIPT_WIDTH): string {
-  const pad = Math.max(0, Math.floor((width - text.length) / 2));
-  return ' '.repeat(pad) + text + '\n';
+/** Columns of the browser-printed receipt (see printReceiptBrowser). */
+export const BROWSER_RECEIPT_WIDTH = 26;
+
+export interface ReceiptTextOptions {
+  /** Characters per line. Defaults to RECEIPT_WIDTH. */
+  width?: number;
+  /** Include the store header. The thermal path prints its own, styled. */
+  includeHeader?: boolean;
 }
 
-function twoColumn(left: string, right: string, width = RECEIPT_WIDTH): string {
-  const space = width - left.length - right.length;
-  if (space <= 0) {
-    return `${left.substring(0, Math.max(0, width - right.length - 1))} ${right}\n`;
+/**
+ * Break text into lines of at most `width` characters, at spaces. A single
+ * word longer than a line is split — overflowing the paper is never better.
+ */
+function wrapWords(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (let word of text.split(/\s+/).filter(Boolean)) {
+    while (word.length > width) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      lines.push(word.slice(0, width));
+      word = word.slice(width);
+    }
+    if (!word) continue;
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= width) {
+      current += ` ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
   }
-  return left + ' '.repeat(space) + right + '\n';
+  if (current) lines.push(current);
+  return lines;
 }
 
-function rule(char = '-', width = RECEIPT_WIDTH): string {
+function centerText(text: string, width: number): string {
+  return wrapWords(text, width)
+    .map((line) => ' '.repeat(Math.floor((width - line.length) / 2)) + line + '\n')
+    .join('');
+}
+
+function rightAlign(text: string, width: number): string {
+  return wrapWords(text, width)
+    .map((line) => ' '.repeat(width - line.length) + line + '\n')
+    .join('');
+}
+
+/** `left   right` on one line; when they cannot share one, `right` drops below. */
+function twoColumn(left: string, right: string, width: number): string {
+  if (left.length + 1 + right.length <= width) {
+    return left + ' '.repeat(width - left.length - right.length) + right + '\n';
+  }
+  return wrapWords(left, width).join('\n') + '\n' + rightAlign(right, width);
+}
+
+/** `Label: value`, with the value moved to its own line when it does not fit. */
+function labelled(label: string, value: string, width: number): string {
+  const line = `${label}: ${value}`;
+  if (line.length <= width) return line + '\n';
+  return `${label}:\n` + rightAlign(value, width);
+}
+
+function rule(width: number, char = '-'): string {
   return char.repeat(width) + '\n';
 }
 
@@ -198,54 +256,64 @@ function rule(char = '-', width = RECEIPT_WIDTH): string {
  * Render the customer receipt as plain monospace text.
  *
  * This single renderer feeds BOTH the ESC/POS thermal path and the browser
- * print fallback, so the two can never diverge in what they disclose.
+ * print fallback, so the two can never diverge in what they disclose — only
+ * the line width differs. No line is ever wider than `width`.
  */
-export function renderCustomerReceiptText(data: CustomerReceiptData): string {
+export function renderCustomerReceiptText(
+  data: CustomerReceiptData,
+  { width = RECEIPT_WIDTH, includeHeader = true }: ReceiptTextOptions = {}
+): string {
   let r = '';
 
-  r += '\n';
-  r += centerText(data.storeName.toUpperCase());
-  if (data.storeAddress) r += centerText(data.storeAddress);
-  if (data.storeCity) r += centerText(data.storeCity);
-  if (data.storePhone) r += centerText(`Ph: ${data.storePhone}`);
-  if (data.storeGSTIN) r += centerText(`GSTIN: ${data.storeGSTIN}`);
-  r += '\n';
-
-  if (data.isReprint) {
-    r += centerText('*** DUPLICATE RECEIPT ***');
+  if (includeHeader) {
+    r += '\n';
+    r += centerText(data.storeName.toUpperCase(), width);
+    if (data.storeAddress) r += centerText(data.storeAddress, width);
+    if (data.storeCity) r += centerText(data.storeCity, width);
+    if (data.storePhone) r += centerText(`Ph: ${data.storePhone}`, width);
+    if (data.storeGSTIN) r += centerText(`GSTIN: ${data.storeGSTIN}`, width);
     r += '\n';
   }
 
-  r += rule();
-  r += `Invoice: ${data.invoiceNumber}\n`;
-  r += `Date: ${data.date}${' '.repeat(6)}Time: ${data.time}\n`;
-  r += `Cashier: ${data.cashierName}\n`;
-  r += rule();
+  if (data.isReprint) {
+    r += centerText('*** DUPLICATE RECEIPT ***', width);
+    r += '\n';
+  }
+
+  r += rule(width);
+  r += labelled('Invoice', data.invoiceNumber, width);
+  const dateTime = `Date: ${data.date}${' '.repeat(6)}Time: ${data.time}`;
+  r +=
+    dateTime.length <= width
+      ? dateTime + '\n'
+      : labelled('Date', data.date, width) + labelled('Time', data.time, width);
+  r += labelled('Cashier', data.cashierName, width);
+  r += rule(width);
 
   // Aggregate only — no product identity of any kind.
-  r += twoColumn('TOTAL PRODUCTS', String(data.totalItems));
+  r += twoColumn('TOTAL PRODUCTS', String(data.totalItems), width);
   if (data.discount > 0) {
-    r += twoColumn('DISCOUNT', `-Rs.${data.discount.toFixed(2)}`);
+    r += twoColumn('DISCOUNT', `-Rs.${data.discount.toFixed(2)}`, width);
   }
-  r += twoColumn('TOTAL AMOUNT', `Rs.${data.grandTotal.toFixed(2)}`);
-  r += rule();
+  r += twoColumn('TOTAL AMOUNT', `Rs.${data.grandTotal.toFixed(2)}`, width);
+  r += rule(width);
 
-  r += `Payment: ${data.paymentMethod}\n`;
+  r += labelled('Payment', data.paymentMethod, width);
   if (data.paymentMethod === 'CASH' && typeof data.amountTendered === 'number') {
-    r += twoColumn('Cash Received', `Rs.${data.amountTendered.toFixed(2)}`);
-    r += twoColumn('Change', `Rs.${(data.changeDue ?? 0).toFixed(2)}`);
+    r += twoColumn('Cash Received', `Rs.${data.amountTendered.toFixed(2)}`, width);
+    r += twoColumn('Change', `Rs.${(data.changeDue ?? 0).toFixed(2)}`, width);
   }
 
   if (typeof data.totalCgst === 'number' && typeof data.totalSgst === 'number') {
-    r += rule();
-    r += twoColumn('CGST (incl.)', `Rs.${data.totalCgst.toFixed(2)}`);
-    r += twoColumn('SGST (incl.)', `Rs.${data.totalSgst.toFixed(2)}`);
-    r += centerText('Price inclusive of GST');
+    r += rule(width);
+    r += twoColumn('CGST (incl.)', `Rs.${data.totalCgst.toFixed(2)}`, width);
+    r += twoColumn('SGST (incl.)', `Rs.${data.totalSgst.toFixed(2)}`, width);
+    r += centerText('Price inclusive of GST', width);
   }
 
-  r += rule();
-  r += centerText('THANK YOU!');
-  r += centerText('VISIT AGAIN');
+  r += rule(width);
+  r += centerText('THANK YOU!', width);
+  r += centerText('VISIT AGAIN', width);
   r += '\n\n';
 
   return r;

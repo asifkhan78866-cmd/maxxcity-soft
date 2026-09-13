@@ -14,6 +14,7 @@
 import {
   type CustomerReceiptData,
   renderCustomerReceiptText,
+  BROWSER_RECEIPT_WIDTH,
 } from './receipt';
 
 export type { CustomerReceiptData };
@@ -133,12 +134,11 @@ export async function printCustomerReceipt(
 
     await sendBytes(COMMANDS.LEFT);
 
-    // Skip the header block already printed above (leading blank + store lines).
-    const body = renderCustomerReceiptText(data)
-      .split('\n')
-      .slice(headerLineCount(data))
-      .join('\n');
-    await sendText(body);
+    // The header is printed above, styled — render only the body. Emphasized
+    // (bold) mode: thermal text at normal weight prints thin and faint.
+    await sendBytes(COMMANDS.BOLD_ON);
+    await sendText(renderCustomerReceiptText(data, { includeHeader: false }));
+    await sendBytes(COMMANDS.BOLD_OFF);
 
     await sendBytes(COMMANDS.FEED);
     await sendBytes(COMMANDS.PARTIAL_CUT);
@@ -157,39 +157,33 @@ export async function printCustomerReceipt(
   }
 }
 
-/** Number of leading lines of the rendered text taken up by the store header. */
-function headerLineCount(data: CustomerReceiptData): number {
-  // leading blank + store name + optional address/city/phone/gstin + trailing blank
-  let n = 2;
-  if (data.storeAddress) n++;
-  if (data.storeCity) n++;
-  if (data.storePhone) n++;
-  if (data.storeGSTIN) n++;
-  return n + 1;
-}
+/**
+ * Font size of the browser-printed receipt.
+ *
+ * Sized against the paper, not picked by eye: BROWSER_RECEIPT_WIDTH columns of
+ * a monospace font (≤ 0.602em per character) at this size is ~250px ≈ 66mm,
+ * inside the ~72mm printable width of an 80mm roll. Any wider and the browser
+ * shrinks the whole receipt to fit, which is what made the text tiny.
+ */
+export const BROWSER_PRINT_FONT_PX = 16;
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
- * Browser print fallback.
+ * The HTML document for the browser-printed receipt.
  *
- * Consumes the exact same sanitized DTO as the thermal path, so the two can
- * never disagree about what the customer sees.
+ * Built from the exact same sanitized DTO and renderer as the thermal path,
+ * so the two can never disagree about what the customer sees.
  */
-export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
-  const receiptText = renderCustomerReceiptText(data);
-  const printWindow = window.open('', '_blank', 'width=400,height=640');
+export function buildReceiptPrintHtml(data: CustomerReceiptData): string {
+  // Drop leading blank lines so the text sits right under the logo.
+  const receiptText = renderCustomerReceiptText(data, { width: BROWSER_RECEIPT_WIDTH }).replace(
+    /^\n+/,
+    ''
+  );
 
-  if (!printWindow) {
-    return {
-      ok: false,
-      via: 'browser',
-      error: 'Print window blocked by the browser. Allow pop-ups to print receipts.',
-    };
-  }
-
-  const escapeHtml = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  printWindow.document.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -197,11 +191,11 @@ export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
   <style>
     @page { margin: 0; size: 80mm auto; }
     body {
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 13px;
+      font-family: Menlo, Consolas, 'Courier New', Courier, monospace;
+      font-size: ${BROWSER_PRINT_FONT_PX}px;
       font-weight: 900; /* Extra bold for dark printing */
       color: #000; /* Pure black */
-      line-height: 1.4;
+      line-height: 1.35;
       margin: 8px;
       white-space: pre;
       text-align: center;
@@ -220,15 +214,36 @@ export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
       white-space: pre;
       font-weight: 900; /* Force bold text */
       text-shadow: 0 0 1px #000; /* Additional trick for darker prints in some browsers */
+      -webkit-text-stroke: 0.35px #000; /* Thicker strokes — thermal heads print thin lines faintly */
       margin-top: -15px; /* Pull the text up even tighter */
     }
   </style>
 </head>
 <body>
   <img src="/logo.jpeg" class="logo" alt="Logo" onload="window.print()" onerror="window.print()" />
-  <div class="content">${escapeHtml(receiptText.replace(/^\\n+/, ''))}</div>
+  <div class="content">${escapeHtml(receiptText)}</div>
 </body>
-</html>`);
+</html>`;
+}
+
+/**
+ * Browser print fallback.
+ *
+ * Consumes the exact same sanitized DTO as the thermal path, so the two can
+ * never disagree about what the customer sees.
+ */
+export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
+  const printWindow = window.open('', '_blank', 'width=400,height=640');
+
+  if (!printWindow) {
+    return {
+      ok: false,
+      via: 'browser',
+      error: 'Print window blocked by the browser. Allow pop-ups to print receipts.',
+    };
+  }
+
+  printWindow.document.write(buildReceiptPrintHtml(data));
   printWindow.document.close();
   printWindow.focus();
 
