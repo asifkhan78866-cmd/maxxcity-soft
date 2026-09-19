@@ -11,6 +11,8 @@ import {
   RECEIPT_WIDTH,
   BROWSER_RECEIPT_WIDTH,
   POLICY_NO_RETURN,
+  SOCIAL_INVITE,
+  SOCIAL_HANDLE,
   type CustomerReceiptData,
 } from '@/lib/backend/receipt';
 
@@ -51,6 +53,19 @@ describe('the receipt promises no exception', () => {
       expect(text).not.toContain('(by ');
     }
   );
+});
+
+describe('every receipt invites the customer to Instagram', () => {
+  it.each([RECEIPT_WIDTH, BROWSER_RECEIPT_WIDTH])('at %i columns', (width) => {
+    const text = flat(renderCustomerReceiptText(receipt(), { width }));
+    expect(text).toContain(SOCIAL_INVITE);
+    expect(text).toContain(SOCIAL_HANDLE);
+  });
+
+  it('prints it on the thermal body too', () => {
+    const body = flat(renderCustomerReceiptText(receipt(), { includeHeader: false }));
+    expect(body).toContain(SOCIAL_HANDLE);
+  });
 });
 
 describe('the policy line survives a thermal printer', () => {

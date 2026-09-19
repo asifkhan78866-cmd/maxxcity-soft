@@ -184,10 +184,14 @@ export const RECEIPT_WIDTH = 48;
 /** Columns of the browser-printed receipt (see printReceiptBrowser). */
 export const BROWSER_RECEIPT_WIDTH = 26;
 
-// ─── Store policy, printed on EVERY receipt ───
+// ─── Store policy and footer, printed on EVERY receipt ───
 // ASCII only, like every other line here — a thermal printer renders
 // characters such as '·' or '₹' as noise.
 export const POLICY_NO_RETURN = 'NO EXCHANGE - NO RETURN';
+
+/** Social footer. Edit these two lines to change what every receipt shows. */
+export const SOCIAL_INVITE = 'For updates follow us on Instagram';
+export const SOCIAL_HANDLE = '@maxxcity_mart';
 
 export interface ReceiptTextOptions {
   /** Characters per line. Defaults to RECEIPT_WIDTH. */
@@ -322,6 +326,10 @@ export function renderCustomerReceiptText(
   r += rule(width);
   r += centerText('THANK YOU!', width);
   r += centerText('VISIT AGAIN', width);
+
+  r += '\n';
+  r += centerText(SOCIAL_INVITE, width);
+  r += centerText(SOCIAL_HANDLE, width);
   r += '\n\n';
 
   return r;
