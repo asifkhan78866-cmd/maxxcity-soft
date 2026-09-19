@@ -56,13 +56,6 @@ export interface CustomerReceiptData {
   totalCgst?: number;
   totalSgst?: number;
 
-  /**
-   * Clock time by which a clothing item must be brought back to be exchanged
-   * (sale time + CLOTHING_EXCHANGE_WINDOW_MINUTES). A time of day only — it
-   * says nothing about what was bought.
-   */
-  exchangeUntil?: string;
-
   /** Marks a duplicate print of an earlier receipt. */
   isReprint?: boolean;
 }
@@ -86,17 +79,6 @@ function formatDate(d: Date): string {
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-}
-
-/**
- * Store policy: a clothing item may be exchanged within this many minutes of
- * the sale. Nothing else is exchanged or returned.
- */
-export const CLOTHING_EXCHANGE_WINDOW_MINUTES = 60;
-
-/** The clock time by which a clothing exchange has to be made. */
-function exchangeDeadline(when: Date): string {
-  return formatTime(new Date(when.getTime() + CLOTHING_EXCHANGE_WINDOW_MINUTES * 60_000));
 }
 
 function storeHeader() {
@@ -144,7 +126,6 @@ export function buildCustomerReceipt(
     paymentMethod: sale.payment_method,
     totalCgst: sale.total_cgst,
     totalSgst: sale.total_sgst,
-    exchangeUntil: exchangeDeadline(when),
     isReprint: options.isReprint ?? false,
   };
 }
@@ -188,7 +169,6 @@ export function buildCustomerReceiptFromCart(input: {
     totalSgst: input.totalSgst,
     amountTendered: input.amountTendered,
     changeDue,
-    exchangeUntil: exchangeDeadline(when),
     isReprint: false,
   };
 }
@@ -205,19 +185,9 @@ export const RECEIPT_WIDTH = 48;
 export const BROWSER_RECEIPT_WIDTH = 26;
 
 // ─── Store policy, printed on EVERY receipt ───
-// Printed on every bill, never only when the basket holds clothing: a line
-// that showed up only for clothing would disclose the category of what was
-// bought, which the privacy rule at the top of this file forbids.
-//
 // ASCII only, like every other line here — a thermal printer renders
 // characters such as '·' or '₹' as noise.
-const EXCHANGE_WINDOW_TEXT =
-  CLOTHING_EXCHANGE_WINDOW_MINUTES === 60
-    ? '1 hour'
-    : `${CLOTHING_EXCHANGE_WINDOW_MINUTES} minutes`;
-
 export const POLICY_NO_RETURN = 'NO EXCHANGE - NO RETURN';
-export const POLICY_CLOTHING = `Clothing only: exchange within ${EXCHANGE_WINDOW_TEXT} of billing`;
 
 export interface ReceiptTextOptions {
   /** Characters per line. Defaults to RECEIPT_WIDTH. */
@@ -348,10 +318,6 @@ export function renderCustomerReceiptText(
 
   r += rule(width);
   r += centerText(POLICY_NO_RETURN, width);
-  r += centerText(
-    data.exchangeUntil ? `${POLICY_CLOTHING} (by ${data.exchangeUntil})` : POLICY_CLOTHING,
-    width
-  );
 
   r += rule(width);
   r += centerText('THANK YOU!', width);
