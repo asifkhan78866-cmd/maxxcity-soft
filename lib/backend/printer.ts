@@ -37,6 +37,131 @@ const COMMANDS = {
   PARTIAL_CUT: new Uint8Array([GS, 0x56, 0x01]),
 };
 
+// ─── Store logo ───
+// The logo has to reach two very different printers:
+//
+//   · the browser print path, where it is INLINED as a data: URI. The print
+//     window is opened blank (window.open('')), so it has no address for a
+//     relative '/logo.jpeg' to resolve against — the image failed to load and
+//     the receipt printed without it.
+//   · the thermal path, which speaks ESC/POS and cannot fetch anything. The
+//     image has to be sent as a one-bit raster (GS v 0).
+
+const LOGO_PATH = '/logo.jpeg';
+
+/** Dots per line on an 80mm printer: 48 columns x 12 dots (see RECEIPT_WIDTH). */
+export const PRINTER_DOTS_PER_LINE = 576;
+
+/** Rows per GS v 0 command. Whole-image rasters overflow small print buffers. */
+const RASTER_SLICE_ROWS = 128;
+
+/** Below this luminance a pixel is ink. Thermal paper has no greys. */
+const LOGO_INK_THRESHOLD = 160;
+
+/**
+ * Pack a monochrome bitmap into ESC/POS raster commands (GS v 0).
+ *
+ * `pixels` is row-major, one entry per dot, 1 = black. Pure and exported so
+ * the encoding can be tested without a printer or a browser.
+ */
+export function encodeRasterImage(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  sliceRows = RASTER_SLICE_ROWS
+): Uint8Array {
+  const widthBytes = Math.ceil(width / 8);
+  const out: number[] = [];
+
+  for (let top = 0; top < height; top += sliceRows) {
+    const rows = Math.min(sliceRows, height - top);
+    // GS v 0 m xL xH yL yH — m=0 is normal size.
+    out.push(GS, 0x76, 0x30, 0x00, widthBytes & 0xff, widthBytes >> 8, rows & 0xff, rows >> 8);
+
+    for (let y = top; y < top + rows; y++) {
+      for (let xByte = 0; xByte < widthBytes; xByte++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const x = xByte * 8 + bit;
+          if (x < width && pixels[y * width + x]) byte |= 0x80 >> bit;
+        }
+        out.push(byte);
+      }
+    }
+  }
+
+  return new Uint8Array(out);
+}
+
+let logoDataUrlPromise: Promise<string | null> | null = null;
+let logoRasterPromise: Promise<Uint8Array | null> | null = null;
+
+/**
+ * The logo as a data: URI, fetched once per page. Null when it cannot be
+ * loaded — a missing logo must never stop a receipt from printing.
+ */
+export function loadLogoDataUrl(): Promise<string | null> {
+  logoDataUrlPromise ??= (async () => {
+    try {
+      const response = await fetch(new URL(LOGO_PATH, window.location.origin), {
+        cache: 'force-cache',
+      });
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  })();
+  return logoDataUrlPromise;
+}
+
+/** The logo as ESC/POS raster bytes, prepared once per page. */
+async function loadLogoRaster(): Promise<Uint8Array | null> {
+  logoRasterPromise ??= (async () => {
+    try {
+      const src = await loadLogoDataUrl();
+      if (!src) return null;
+
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+
+      const width = PRINTER_DOTS_PER_LINE;
+      const height = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * width));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      // Paper is white: flatten any transparency onto it before thresholding.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(image, 0, 0, width, height);
+
+      const { data: rgba } = ctx.getImageData(0, 0, width, height);
+      const pixels = new Uint8Array(width * height);
+      for (let i = 0; i < pixels.length; i++) {
+        const [r, g, b, a] = [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]];
+        const luminance = a < 128 ? 255 : 0.299 * r + 0.587 * g + 0.114 * b;
+        pixels[i] = luminance < LOGO_INK_THRESHOLD ? 1 : 0;
+      }
+
+      return encodeRasterImage(pixels, width, height);
+    } catch {
+      return null;
+    }
+  })();
+  return logoRasterPromise;
+}
+
 interface PrinterConnection {
   port: SerialPort;
   writer: WritableStreamDefaultWriter<Uint8Array>;
@@ -122,6 +247,13 @@ export async function printCustomerReceipt(
     await sendBytes(COMMANDS.INIT);
 
     await sendBytes(COMMANDS.CENTER);
+
+    // The logo, as a raster bitmap. ESC/POS cannot fetch an image, and a
+    // printer that rejects the raster must still get the receipt, so a
+    // failure here only means no logo.
+    const logo = await loadLogoRaster();
+    if (logo) await sendBytes(logo);
+
     await sendBytes(COMMANDS.DOUBLE_HEIGHT);
     await sendBytes(COMMANDS.BOLD_ON);
     await sendText(data.storeName.toUpperCase() + '\n');
@@ -147,7 +279,7 @@ export async function printCustomerReceipt(
   } catch (error) {
     console.error('Thermal print error:', error);
     // Try the browser path so the customer still gets a receipt.
-    const fallback = printReceiptBrowser(data);
+    const fallback = await printReceiptBrowser(data);
     if (fallback.ok) return { ok: true, via: 'browser' };
     return {
       ok: false,
@@ -176,12 +308,22 @@ const escapeHtml = (s: string) =>
  * Built from the exact same sanitized DTO and renderer as the thermal path,
  * so the two can never disagree about what the customer sees.
  */
-export function buildReceiptPrintHtml(data: CustomerReceiptData): string {
+export function buildReceiptPrintHtml(
+  data: CustomerReceiptData,
+  logoSrc: string | null = null
+): string {
   // Drop leading blank lines so the text sits right under the logo.
   const receiptText = renderCustomerReceiptText(data, { width: BROWSER_RECEIPT_WIDTH }).replace(
     /^\n+/,
     ''
   );
+
+  // Inlined as a data: URI by the caller. A relative '/logo.jpeg' cannot work
+  // here: the print window is opened blank, so it has no address to resolve
+  // against. When the logo could not be loaded the receipt prints without it.
+  const logo = logoSrc
+    ? `  <img src="${logoSrc}" class="logo" alt="${escapeHtml(data.storeName)}" />\n`
+    : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -205,8 +347,10 @@ export function buildReceiptPrintHtml(data: CustomerReceiptData): string {
       width: 75mm; /* Enlarged to almost fill the 80mm receipt width */
       max-width: 100%;
       margin: 0 auto -5px auto; /* Reduced space below logo */
-      filter: grayscale(100%) contrast(2.5) brightness(0.6); /* Force maximum darkness for the text */
-      mix-blend-mode: multiply; /* Removes white background */
+      /* Snap the logo to pure black and white. A thermal head prints no
+         greys: brightness() darkened the logo's white background to grey,
+         which came out as a solid block around the logo. */
+      filter: grayscale(1) contrast(1000%);
     }
     .content {
       text-align: left;
@@ -220,8 +364,12 @@ export function buildReceiptPrintHtml(data: CustomerReceiptData): string {
   </style>
 </head>
 <body>
-  <img src="/logo.jpeg" class="logo" alt="Logo" onload="window.print()" onerror="window.print()" />
-  <div class="content">${escapeHtml(receiptText)}</div>
+${logo}  <div class="content">${escapeHtml(receiptText)}</div>
+  <script>
+    // load fires once images are decoded — or have failed. Printing from here
+    // rather than from the image means a missing logo still prints a receipt.
+    window.addEventListener('load', function () { window.print(); });
+  </script>
 </body>
 </html>`;
 }
@@ -232,7 +380,9 @@ export function buildReceiptPrintHtml(data: CustomerReceiptData): string {
  * Consumes the exact same sanitized DTO as the thermal path, so the two can
  * never disagree about what the customer sees.
  */
-export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
+export async function printReceiptBrowser(data: CustomerReceiptData): Promise<PrintOutcome> {
+  // Opened BEFORE anything is awaited: a popup is only allowed while the
+  // click that started the print is still the current task.
   const printWindow = window.open('', '_blank', 'width=400,height=640');
 
   if (!printWindow) {
@@ -243,7 +393,9 @@ export function printReceiptBrowser(data: CustomerReceiptData): PrintOutcome {
     };
   }
 
-  printWindow.document.write(buildReceiptPrintHtml(data));
+  const logoSrc = await loadLogoDataUrl();
+
+  printWindow.document.write(buildReceiptPrintHtml(data, logoSrc));
   printWindow.document.close();
   printWindow.focus();
 
